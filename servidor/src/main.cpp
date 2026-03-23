@@ -20,6 +20,7 @@
 #endif
 
 #include "../../compartido/protocolo.h"
+#include "db_manager.h"
 
 int main() {
     // Inicialización para Windows
@@ -65,6 +66,7 @@ int main() {
     std::cout << "DEUSTO LOGISTICS - SERVIDOR [Puerto 8080]" << std::endl;
 
     while(true) {
+	db_init("datos/almacen.db");
         new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
         if (new_socket == INVALID_SOCKET) continue;
 
@@ -78,6 +80,7 @@ int main() {
                       << " | Op: " << mov.tipo_op << std::endl;
 
             // Respuesta (RespuestaServidor)
+		db_registrar_movimiento(mov, 100);
             RespuestaServidor res = {0, 100, "Operacion recibida correctamente"};
             send(new_socket, (const char*)&res, sizeof(RespuestaServidor), 0);
         }
