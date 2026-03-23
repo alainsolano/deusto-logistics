@@ -1,0 +1,16 @@
+# Ejecutables
+*.exe
+*.out
+servidor/servidor_app
+cliente/cliente_app
+
+# Objetos y librerías
+*.o
+*.a
+
+# Base de datos local
+datos/almacen.db
+
+# Logs de sesión
+logs/*.log
+EOT
