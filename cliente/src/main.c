@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include "menu.h"
 #include "../../compartido/protocolo.h"
 
 int main() {
@@ -45,24 +46,8 @@ int main() {
         return -1;
     }
 
-    // Datos hardcodeados (Paso 3 de tu plan) [cite: 47]
-    struct MovimientoStock prueba;
-    memset(&prueba, 0, sizeof(struct MovimientoStock));
-    strcpy(prueba.id_producto, "PROD-0042");
-    prueba.cantidad = 50;
-    prueba.tipo_op = 'E';
-    prueba.timestamp = (int64_t)time(NULL);
-    strcpy(prueba.id_operario, "alain_s");
-
-    printf("Enviando movimiento: %s...\n", prueba.id_producto);
-    send(sock, (const char*)&prueba, sizeof(struct MovimientoStock), 0);
-    
-    struct RespuestaServidor res;
-    int n = recv(sock, (char*)&res, sizeof(struct RespuestaServidor), 0);
-
-    if (n > 0) {
-        printf("Servidor responde: %s (Stock: %d)\n", res.mensaje, res.stock_actual);
-    }
+    char id_operario[16] = "alain_s";
+    menu_principal(sock, id_operario);
 
     CLOSE_SOCKET(sock);
     #ifdef _WIN32

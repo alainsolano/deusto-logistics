@@ -65,27 +65,37 @@ int main() {
 
     std::cout << "DEUSTO LOGISTICS - SERVIDOR [Puerto 8080]" << std::endl;
 
-    while(true) {
 	db_init("datos/almacen.db");
-        new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
-        if (new_socket == INVALID_SOCKET) continue;
 
-        MovimientoStock mov;
-        // 5. Recibir estructura binaria (RF-07)
-        int bytes = recv(new_socket, (char*)&mov, sizeof(MovimientoStock), 0);
-        
-        if (bytes == sizeof(MovimientoStock)) {
-            std::cout << "\n[LOG] Movimiento: " << mov.id_producto 
-                      << " | Cantidad: " << mov.cantidad 
-                      << " | Op: " << mov.tipo_op << std::endl;
+    while(true) {
+    new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+    if (new_socket == INVALID_SOCKET) continue;
 
-            // Respuesta (RespuestaServidor)
-		db_registrar_movimiento(mov, 100);
-            RespuestaServidor res = {0, 100, "Operacion recibida correctamente"};
-            send(new_socket, (const char*)&res, sizeof(RespuestaServidor), 0);
+    std::cout << "\n[+] Cliente conectado." << std::endl;
+
+    // Bucle interno: atiende todos los movimientos del mismo cliente
+        while(true) {
+            MovimientoStock mov;
+            int bytes = recv(new_socket, (char*)&mov, sizeof(MovimientoStock), 0);
+
+            // Si bytes <= 0 el cliente se desconectó
+            if (bytes <= 0) {
+                std::cout << "[-] Cliente desconectado." << std::endl;
+                break;
+            }
+
+            if (bytes == sizeof(MovimientoStock)) {
+                std::cout << "\n[LOG] Movimiento: " << mov.id_producto 
+                        << " | Cantidad: " << mov.cantidad 
+                        << " | Op: " << mov.tipo_op << std::endl;
+
+                db_registrar_movimiento(mov, 100);
+                RespuestaServidor res = {0, 100, "Operacion recibida correctamente"};
+                send(new_socket, (const char*)&res, sizeof(RespuestaServidor), 0);
+            }
         }
 
-        CLOSE_SOCKET(new_socket);
+    CLOSE_SOCKET(new_socket);
     }
 
     CLOSE_SOCKET(server_fd);

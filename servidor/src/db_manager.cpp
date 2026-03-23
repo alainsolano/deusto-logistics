@@ -9,6 +9,8 @@ bool db_init(const char* ruta) {
         std::cerr << "Error abriendo BD: " << sqlite3_errmsg(db) << std::endl;
         return false;
     }
+    std::cout << "[BD] Archivo abierto: " << ruta << std::endl;
+
     const char* sql =
         "CREATE TABLE IF NOT EXISTS PRODUCTOS ("
         "  id_producto TEXT PRIMARY KEY,"
@@ -23,16 +25,18 @@ bool db_init(const char* ruta) {
         "  cantidad INTEGER NOT NULL,"
         "  stock_resultante INTEGER NOT NULL,"
         "  timestamp INTEGER NOT NULL,"
-        "  id_operario TEXT NOT NULL,"
-        "  FOREIGN KEY(id_producto) REFERENCES PRODUCTOS(id_producto)"
+        "  id_operario TEXT NOT NULL"
         ");";
+
     char* err = nullptr;
-    if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
-        std::cerr << "Error creando tablas: " << err << std::endl;
+    int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
+    if (rc != SQLITE_OK) {
+        std::cerr << "[BD] Error creando tablas: " << err << std::endl;
         sqlite3_free(err);
         return false;
     }
-    std::cout << "[BD] Base de datos lista." << std::endl;
+
+    std::cout << "[BD] Tablas creadas correctamente." << std::endl;
     return true;
 }
 
@@ -41,6 +45,7 @@ bool db_registrar_movimiento(const MovimientoStock& mov, int stock_resultante) {
         "INSERT INTO HISTORIAL_MOVIMIENTOS "
         "(id_producto, tipo_operacion, cantidad, stock_resultante, timestamp, id_operario) "
         "VALUES (?, ?, ?, ?, ?, ?);";
+
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
     sqlite3_bind_text (stmt, 1, mov.id_producto, -1, SQLITE_STATIC);
@@ -49,7 +54,11 @@ bool db_registrar_movimiento(const MovimientoStock& mov, int stock_resultante) {
     sqlite3_bind_int  (stmt, 4, stock_resultante);
     sqlite3_bind_int64(stmt, 5, mov.timestamp);
     sqlite3_bind_text (stmt, 6, mov.id_operario, -1, SQLITE_STATIC);
+
     bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    if (!ok) {
+        std::cerr << "[BD] Error insertando movimiento: " << sqlite3_errmsg(db) << std::endl;
+    }
     sqlite3_finalize(stmt);
     return ok;
 }
