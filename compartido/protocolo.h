@@ -20,6 +20,6 @@ struct RespuestaServidor
     char mensaje[64];
 };
 
-#pragma pack(pop);
+#pragma pack(pop)
 
 #endif
