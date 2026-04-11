@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-
+#include "logger.h"
 
 static void enviar_movimiento(SOCKET_T sock, const char* id_operario, char tipo) {
     struct MovimientoStock mov;
@@ -17,16 +17,31 @@ static void enviar_movimiento(SOCKET_T sock, const char* id_operario, char tipo)
     mov.tipo_op = tipo;
     mov.timestamp = (int64_t)time(NULL);
     strncpy(mov.id_operario, id_operario, 15);
+    mov.id_operario[15] = '\0';
 
     send(sock, (const char*)&mov, sizeof(mov), 0);
 
     struct RespuestaServidor res;
     recv(sock, (char*)&res, sizeof(res), 0);
+    char log_msg[128];
 
     if (res.codigo == 0) {
         printf("✓ %s  (Stock actual: %d)\n", res.mensaje, res.stock_actual);
+        if (tipo == 'E') {
+            sprintf(log_msg, "Entrada: %s +%d", mov.id_producto, mov.cantidad);
+        } else if (tipo == 'S') {
+            sprintf(log_msg, "Salida: %s -%d", mov.id_producto, mov.cantidad);
+        } else if (tipo == 'C') {
+            sprintf(log_msg, "Consulta: %s", mov.id_producto);
+        }
+
+        escribir_log(log_msg);
+    
     } else {
         printf("✗ Error: %s\n", res.mensaje);
+
+        sprintf(log_msg, "ERROR (%c): %s", tipo, res.mensaje);
+        escribir_log(log_msg);
     }
 }
 
