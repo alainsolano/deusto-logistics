@@ -8,10 +8,7 @@ void limpiar_menu();
 void mostrar_ficha_producto(const char* id_prod);
 void ventana_operaciones(SOCKET_T sock, const char* id_operario);
 void ventana_historial();
-
-// =============================================================
-// ESTILO 1 MODIFICADO: MENU PRINCIPAL (Industrial con Marco Doble)
-// =============================================================
+S
 void menu_principal(SOCKET_T sock, const char* id_operario) {
     int opcion;
     while (1) {
@@ -38,16 +35,13 @@ void menu_principal(SOCKET_T sock, const char* id_operario) {
 
         switch (opcion) {
             case 1: ventana_operaciones(sock, id_operario); break;
-            case 2: mostrar_ficha_producto("PROD-DEUSTO-01"); break; 
+            case 2: mostrar_ficha_producto("PROD-DEUSTO-XX"); break; 
             case 3: ventana_historial(); break;
             case 0: return;
         }
     }
 }
 
-// =============================================================
-// ESTILO 3: FICHA DE PRODUCTO (Detalle Informativo)
-// =============================================================
 void mostrar_ficha_producto(const char* id_prod) {
     limpiar_menu();
     printf("  ┌──────────────────────────────────────────────────────────┐\n");
@@ -57,7 +51,7 @@ void mostrar_ficha_producto(const char* id_prod) {
     printf("  │  > Proveedor: %-15s   > Estante: %-10s │\n", "DeustoCorp", "04");
     printf("  ├──────────────────────────────────────────────────────────┤\n");
     printf("  │  STOCK ACTUAL: [ 100 unidades ]                          │\n");
-    printf("  │  ESTADO:       [ ESTABLE ]                               │\n");
+    printf("  │  ESTADO:       [ XXX ]                                   │\n");
     printf("  └──────────────────────────────────────────────────────────┘\n");
     printf("\n  Presione Enter para volver...");
     getchar(); getchar(); 

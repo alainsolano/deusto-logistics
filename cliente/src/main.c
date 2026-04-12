@@ -79,8 +79,10 @@ void ventana_registro() {
 
 void ventana_acerca_de() {
     limpiar_pantalla();
-    printf("  DEUSTO LOGISTICS TERMINAL\n");
-    printf("  Autor: Grupo 6\n");
+    printf("  ╔══════════════════════════════════════════╗\n");
+    printf("  ║       DEUSTO LOGISTICS TERMINAL          ║\n");
+    printf("  ╚══════════════════════════════════════════╝\n");
+    printf("  \nAutor: Grupo 6\n");
     printf("\n  Presione Enter para volver...");
     getchar(); getchar();
 }
