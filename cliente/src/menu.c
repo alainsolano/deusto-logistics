@@ -1,74 +1,92 @@
-#include <stdio.h>
-#include <string.h>
-#include <time.h>
 #include "menu.h"
-#include "logger.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "../../compartido/protocolo.h"
 
-static void enviar_movimiento(SOCKET_T sock, const char* id_operario, char tipo){
-    struct MovimientoStock mov;
-    memset(&mov, 0, sizeof(mov));
+void limpiar_menu();
+void mostrar_ficha_producto(const char* id_prod);
+void ventana_operaciones(SOCKET_T sock, const char* id_operario);
+void ventana_historial();
 
-    printf("ID de producto: ");
-    scanf("%15s", mov.id_producto);
-
-    if (tipo != 'C') {
-        printf("Cantidad: ");
-        scanf("%d", &mov.cantidad);
-    } else {
-        mov.cantidad = 0;
-    }
-
-    mov.tipo_op = tipo;
-    mov.timestamp = (int64_t)time(NULL);
-    strncpy(mov.id_operario, id_operario, 15);
-    mov.id_operario[15] = '\0';
-
-    struct RespuestaServidor res;
-    res.codigo = 0; //EXITO
-    res.stock_actual = 100; //VALOR SIMULADO
-    strcpy(res.mensaje, "Operacion registrada con exito.");
-    
-    char log_msg[128];
-
-    if (res.codigo == 0) {
-        if (tipo == 'C') {
-            printf("Cantidad actual es de %s: %d\n", mov.id_producto, res.stock_actual);
-            snprintf(log_msg, sizeof(log_msg), "Consulta: %s (Stock: %d)", mov.id_producto, res.stock_actual);
-        } else {
-            printf("OK %s (Stock actual: %d)\n", res.mensaje, res.stock_actual);
-            if (tipo == 'E') snprintf(log_msg, sizeof(log_msg), "Entrada: %s +%d", mov.id_producto, mov.cantidad);
-            else snprintf(log_msg, sizeof(log_msg), "Salida: %s -%d", mov.id_producto, mov.cantidad);
-        }
-        escribir_log(log_msg);
+// =============================================================
+// ESTILO 1 MODIFICADO: MENU PRINCIPAL (Industrial con Marco Doble)
+// =============================================================
+void menu_principal(SOCKET_T sock, const char* id_operario) {
+    int opcion;
+    while (1) {
+        limpiar_menu();
+        printf("  ╔══════════════════════════════════════════════════════════╗\n");
+        printf("  ║                PANEL DE CONTROL PRINCIPAL                ║\n");
+        printf("  ╠══════════════════════════════════════════════════════════╣\n");
+        printf("  ║ Operario: %-18s        Estado: [CONECTADO]  ║\n", id_operario);
+        printf("  ╠══════════════════════════════════════════════════════════╣\n");
+        printf("  ║                                                          ║\n");
+        printf("  ║  1. [MOVIMIENTO] Registrar Entrada/Salida                ║\n");
+        printf("  ║  2. [INVENTARIO] Ver Ficha de Producto                   ║\n");
+        printf("  ║  3. [AUDITORIA]  Consultar Historial de Logs             ║\n");
+        printf("  ║                                                          ║\n");
+        printf("  ║  0. CERRAR SESION                                        ║\n");
+        printf("  ║                                                          ║\n");
+        printf("  ╚══════════════════════════════════════════════════════════╝\n");
+        printf("  >> Seleccione una seccion: ");
         
-    } else {
-        printf("Error: %s\n", res.mensaje);
-        sprintf(log_msg, "ERROR (%c): %s", tipo, res.mensaje);
-        escribir_log(log_msg);
+        if (scanf("%d", &opcion) != 1) {
+            while(getchar() != '\n'); 
+            continue;
+        }
+
+        switch (opcion) {
+            case 1: ventana_operaciones(sock, id_operario); break;
+            case 2: mostrar_ficha_producto("PROD-DEUSTO-01"); break; 
+            case 3: ventana_historial(); break;
+            case 0: return;
+        }
     }
 }
 
-void menu_principal(SOCKET_T sock, const char* id_operario) {
-    int opcion;
-    while(1) {
-        printf("\n=== DEUSTO LOGISTICS - TERMINAL ===\n");
-        printf(" 1. Registrar entrada de stock\n");
-        printf(" 2. Registrar salida de stock\n");
-        printf(" 3. Consultar stock\n");
-        printf(" 0. Salir\n");
-        printf("Opcion: ");
+// =============================================================
+// ESTILO 3: FICHA DE PRODUCTO (Detalle Informativo)
+// =============================================================
+void mostrar_ficha_producto(const char* id_prod) {
+    limpiar_menu();
+    printf("  ┌──────────────────────────────────────────────────────────┐\n");
+    printf("  │ DETALLE DE PRODUCTO: %-35s                      │\n", id_prod);
+    printf("  ├──────────────────────────────────────────────────────────┤\n");
+    printf("  │  > Categoria: %-15s   > Pasillo: %-10s │\n", "Logistica", "A-12");
+    printf("  │  > Proveedor: %-15s   > Estante: %-10s │\n", "DeustoCorp", "04");
+    printf("  ├──────────────────────────────────────────────────────────┤\n");
+    printf("  │  STOCK ACTUAL: [ 100 unidades ]                          │\n");
+    printf("  │  ESTADO:       [ ESTABLE ]                               │\n");
+    printf("  └──────────────────────────────────────────────────────────┘\n");
+    printf("\n  Presione Enter para volver...");
+    getchar(); getchar(); 
+}
 
-        if (scanf("%d", &opcion) != 1) break;
+void limpiar_menu() {
+#ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
+}
 
-        switch (opcion)
-        {
-        case 1: enviar_movimiento(sock, id_operario, 'E'); break;
-        case 2: enviar_movimiento(sock, id_operario, 'S'); break;
-        case 3: enviar_movimiento(sock, id_operario, 'C'); break;
-        case 0: return;
-        default:
-            printf("Opcion no valida.\n");
-        }
-    }
+void ventana_operaciones(SOCKET_T sock, const char* id_operario) {
+    limpiar_menu();
+    printf("  ╔══════════════════════════════════════════╗\n");
+    printf("  ║        REGISTRO DE MOVIMIENTOS           ║\n");
+    printf("  ╚══════════════════════════════════════════╝\n");
+    printf("\n  [ Tarea: Capturar ID, Cantidad y llamar a escribir_log ]\n");
+    printf("\n  Presione Enter para volver...");
+    getchar(); getchar();
+}
+
+void ventana_historial() {
+    limpiar_menu();
+    printf("  ╔══════════════════════════════════════════╗\n");
+    printf("  ║         AUDITORIA DE SISTEMA             ║\n");
+    printf("  ╚══════════════════════════════════════════╝\n");
+    printf("\n  [ Tarea: Implementar lectura de logs/log.txt ]\n");
+    printf("\n  Presione Enter para volver...");
+    getchar(); getchar();
 }
