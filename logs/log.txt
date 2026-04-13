@@ -4,3 +4,6 @@
 [2026-04-12 19:30:30] Entrada: prod-0043 +8
 [2026-04-12 19:30:44] Salida: prod-0045 -20
 [2026-04-12 20:05:09] Consulta: prod-0042 (Stock: 100)
+[2026-04-13 12:13:40] [ENTRADA] Operario=admin         Producto=prod-0042        Tipo=E  Cantidad=23
+[2026-04-13 12:15:40] [SALIDA ] Operario=admin         Producto=Prod-0042        Tipo=S  Cantidad=12
+[2026-04-13 12:16:04] [ENTRADA] Operario=admin         Producto=prod-001         Tipo=E  Cantidad=12

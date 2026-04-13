@@ -5,7 +5,7 @@
 void escribir_log(const char* mensaje) {
     FILE *f = fopen("logs/log.txt", "a");
     if (f == NULL) {
-        printf("Error al abrir el archivo de log\n");
+        printf("  [!] Error al abrir el archivo de log\n");
         return;
     }
 
@@ -14,7 +14,7 @@ void escribir_log(const char* mensaje) {
 
     fprintf(f, "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
         t->tm_year + 1900,
-        t->tm_mon + 1,
+        t->tm_mon  + 1,
         t->tm_mday,
         t->tm_hour,
         t->tm_min,
