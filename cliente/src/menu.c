@@ -284,3 +284,97 @@ void ventana_historial() {
     printf("\n  Presione Enter para volver...");
     getchar(); getchar();
 }
+
+typedef struct { char username[16]; char password[16]; } Usuario;
+extern Usuario db_usuarios[];
+extern int total_usuarios;
+extern void guardar_usuarios();
+ 
+void ventana_cambiar_contrasena(const char* id_operario) {
+    char pass_actual[16], pass_nueva[16], pass_confirm[16];
+ 
+    limpiar_menu();
+    printf("  ╔══════════════════════════════════════════╗\n");
+    printf("  ║         CAMBIAR CONTRASENA               ║\n");
+    printf("  ╠══════════════════════════════════════════╣\n");
+    printf("  ║  Operario: %-29s║\n", id_operario);
+    printf("  ╚══════════════════════════════════════════╝\n\n");
+ 
+    printf("  > Contrasena actual:   ");
+    if (scanf("%15s", pass_actual) != 1) { while(getchar()!='\n'); return; }
+ 
+    /* Verificar contraseña actual */
+    int idx = -1;
+    for (int i = 0; i < total_usuarios; i++) {
+        if (strcmp(id_operario, db_usuarios[i].username) == 0) {
+            idx = i;
+            break;
+        }
+    }
+ 
+    if (idx == -1 || strcmp(pass_actual, db_usuarios[idx].password) != 0) {
+        limpiar_menu();
+        printf("  ╔══════════════════════════════════════════╗\n");
+        printf("  ║         CAMBIAR CONTRASENA               ║\n");
+        printf("  ╠══════════════════════════════════════════╣\n");
+        printf("  ║  [!] Contrasena actual incorrecta.       ║\n");
+        printf("  ║      Operacion cancelada.                ║\n");
+        printf("  ╚══════════════════════════════════════════╝\n");
+        printf("\n  Presione Enter para volver...");
+        getchar(); getchar();
+        return;
+    }
+ 
+    printf("  > Nueva contrasena:    ");
+    if (scanf("%15s", pass_nueva) != 1) { while(getchar()!='\n'); return; }
+    printf("  > Confirmar contrasena:");
+    if (scanf("%15s", pass_confirm) != 1) { while(getchar()!='\n'); return; }
+ 
+    if (strcmp(pass_nueva, pass_confirm) != 0) {
+        limpiar_menu();
+        printf("  ╔══════════════════════════════════════════╗\n");
+        printf("  ║         CAMBIAR CONTRASENA               ║\n");
+        printf("  ╠══════════════════════════════════════════╣\n");
+        printf("  ║  [!] Las contrasenas no coinciden.       ║\n");
+        printf("  ║      Operacion cancelada.                ║\n");
+        printf("  ╚══════════════════════════════════════════╝\n");
+        printf("\n  Presione Enter para volver...");
+        getchar(); getchar();
+        return;
+    }
+ 
+    if (strlen(pass_nueva) < 4) {
+        limpiar_menu();
+        printf("  ╔══════════════════════════════════════════╗\n");
+        printf("  ║         CAMBIAR CONTRASENA               ║\n");
+        printf("  ╠══════════════════════════════════════════╣\n");
+        printf("  ║  [!] La contrasena debe tener            ║\n");
+        printf("  ║      al menos 4 caracteres.              ║\n");
+        printf("  ╚══════════════════════════════════════════╝\n");
+        printf("\n  Presione Enter para volver...");
+        getchar(); getchar();
+        return;
+    }
+ 
+    /* Actualizar y persistir */
+    strncpy(db_usuarios[idx].password, pass_nueva, 15);
+    guardar_usuarios();
+ 
+    /* Log del evento */
+    char log_msg[128];
+    snprintf(log_msg, sizeof(log_msg),
+        "[SEGURIDAD] Operario=%-12s  Accion=CAMBIO_CONTRASENA",
+        id_operario);
+    escribir_log(log_msg);
+ 
+    limpiar_menu();
+    printf("  ╔══════════════════════════════════════════╗\n");
+    printf("  ║         CAMBIAR CONTRASENA               ║\n");
+    printf("  ╠══════════════════════════════════════════╣\n");
+    printf("  ║                                          ║\n");
+    printf("  ║  [OK] Contrasena actualizada con exito.  ║\n");
+    printf("  ║                                          ║\n");
+    printf("  ╚══════════════════════════════════════════╝\n");
+    printf("\n  Presione Enter para volver...");
+    getchar(); getchar();
+}
