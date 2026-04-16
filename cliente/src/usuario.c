@@ -1,8 +1,7 @@
-#include "usuarios.h"
+#include "usuario.h"
 #include <stdio.h>
 #include <string.h>
-
-#define FICHERO_USUARIOS "datos/usuarios.dat"
+#include "config.h"
 
 Usuario db_usuarios[MAX_USUARIOS] = {
     {"alain_s", "1234"},
@@ -12,7 +11,7 @@ Usuario db_usuarios[MAX_USUARIOS] = {
 int total_usuarios = 2;
 
 void cargar_usuarios(void) {
-    FILE *f = fopen(FICHERO_USUARIOS, "rb");
+    FILE *f = fopen(g_config.ruta_usuarios, "rb");
     int n = 0;
 
     if (f == NULL) {
@@ -33,7 +32,8 @@ void cargar_usuarios(void) {
 }
 
 void guardar_usuarios(void) {
-    FILE *f = fopen(FICHERO_USUARIOS, "wb");
+    FILE *f = fopen(g_config.ruta_usuarios, "wb");
+
     if (f == NULL) {
         return;
     }

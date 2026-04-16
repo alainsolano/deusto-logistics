@@ -2,9 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include "menu.h"
-#include "usuarios.h"
-
-
+#include "usuario.h"
+#include "config.h"
+#include "db.h"
 
 void limpiar_pantalla() {
 #ifdef _WIN32
@@ -46,16 +46,19 @@ int ventana_login(char* usuario_logueado) {
         scanf("%15s", pass);
 
         for (int i = 0; i < total_usuarios; i++) {
-            if (strcmp(user, db_usuarios[i].username) == 0 && 
+            if (strcmp(user, db_usuarios[i].username) == 0 &&
                 strcmp(pass, db_usuarios[i].password) == 0) {
                 strcpy(usuario_logueado, user);
                 return 1;
             }
         }
+
         intentos--;
         printf("\n  [!] Credenciales incorrectas. Enter para reintentar...");
-        getchar(); getchar(); 
+        getchar();
+        getchar();
     }
+
     return 0;
 }
 
@@ -128,27 +131,55 @@ void ventana_acerca_de() {
     printf("  ╚══════════════════════════════════════════╝\n");
     printf("  \nAutor: Grupo 6\n");
     printf("\n  Presione Enter para volver...");
-    getchar(); getchar();
+    getchar();
+    getchar();
 }
 
 int main() {
     int opcion;
     char user_act[16];
+
+    if (cargar_config("datos/config.txt") != 0) {
+        printf("Error: no se pudo cargar datos/config.txt\n");
+        return 1;
+    }
+
+    cargar_usuarios();
+
+    if (db_inicializar() != 0) {
+        printf("Error: no se pudo abrir la base de datos\n");
+        return 1;
+    }
+
     while (1) {
         ventana_bienvenida();
+
         if (scanf("%d", &opcion) != 1) {
-            while(getchar() != '\n'); 
+            while (getchar() != '\n');
             continue;
         }
-        
-        switch(opcion) {
-            case 1: 
-                if (ventana_login(user_act)) menu_principal(0, user_act); 
+
+        switch (opcion) {
+            case 1:
+                if (ventana_login(user_act)) {
+                    menu_principal(0, user_act);
+                }
                 break;
-            case 2: ventana_registro(); break;
-            case 3: ventana_acerca_de(); break;
-            case 0: return 0;
+            case 2:
+                ventana_registro();
+                break;
+            case 3:
+                ventana_acerca_de();
+                break;
+            case 0:
+                return 0;
+            default:
+                printf("\n[!] Opcion no valida. Presione Enter para continuar...");
+                getchar();
+                getchar();
+                break;
         }
     }
+
     return 0;
 }

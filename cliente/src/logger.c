@@ -1,9 +1,11 @@
 #include "logger.h"
 #include <stdio.h>
 #include <time.h>
+#include "config.h"
 
 void escribir_log(const char* mensaje) {
-    FILE *f = fopen("logs/log.txt", "a");
+    FILE *f = fopen(g_config.ruta_log, "a");
+
     if (f == NULL) {
         printf("  [!] Error al abrir el archivo de log\n");
         return;

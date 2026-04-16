@@ -1,0 +1,5 @@
+RUTA_LOG=logs/log.txt
+RUTA_USUARIOS=datos/usuarios.dat
+RUTA_DB=datos/deusto_logistics.db
+ADMIN_USER=admin
+ADMIN_PASS=admin

@@ -5,7 +5,8 @@
 #include <time.h>
 #include "logger.h"
 #include "../../compartido/protocolo.h"
-#include "usuarios.h"
+#include "usuario.h"
+#include "db.h"
 
 /* ── Prototipos internos ── */
 void limpiar_menu();
@@ -107,7 +108,7 @@ void ventana_operaciones(SOCKET_T sock, const char* id_operario) {
     }
 
     /* Construir struct y registrar en log */
-    struct MovimientoStock mov;
+     MovimientoStock mov;
     memset(&mov, 0, sizeof(mov));
     strncpy(mov.id_producto, id_prod,     sizeof(mov.id_producto) - 1);
     strncpy(mov.id_operario, id_operario, sizeof(mov.id_operario) - 1);
@@ -122,6 +123,9 @@ void ventana_operaciones(SOCKET_T sock, const char* id_operario) {
         mov.id_operario, mov.id_producto, mov.tipo_op, mov.cantidad);
 
     escribir_log(log_msg);
+    if (db_insertar_movimiento(mov.id_producto, mov.cantidad, mov.tipo_op, mov.id_operario) != 0) {
+    printf("\n  [!] Error al guardar en la base de datos.");
+}
 
     /* Confirmacion visual */
     limpiar_menu();
@@ -159,23 +163,11 @@ void mostrar_ficha_producto(const char* id_prod_param) {
         id_prod = id_prod_param;
     }
 
-    /* Calcular stock leyendo el log */
-    FILE *flog = fopen("logs/log.txt", "r");
-    int stock = 0, entradas = 0, salidas = 0;
+    int stock = 0;
+    int entradas = 0;
+    int salidas = 0;
 
-    if (flog != NULL) {
-        char linea[256];
-        while (fgets(linea, sizeof(linea), flog)) {
-            if (strstr(linea, id_prod) == NULL) continue;
-            int cant = 0;
-            char tipo_str[8];
-            if (sscanf(linea, "%*[^[][%7[^]]]%*[^C]Cantidad=%d", tipo_str, &cant) == 2) {
-                if (strncmp(tipo_str, "ENTRADA", 7) == 0) { stock+=cant; entradas+=cant; }
-                else                                       { stock-=cant; salidas +=cant; }
-            }
-        }
-        fclose(flog);
-    }
+db_obtener_stock(id_prod, &stock, &entradas, &salidas);
 
     const char* estado;
     if      (stock <= 0)  estado = "SIN STOCK";
