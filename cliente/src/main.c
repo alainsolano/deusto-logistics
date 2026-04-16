@@ -2,17 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include "menu.h"
+#include "usuarios.h"
 
-typedef struct {
-    char username[16];
-    char password[16];
-} Usuario;
 
-Usuario db_usuarios[] = {
-    {"alain_s", "1234"},
-    {"admin", "admin"}
-};
-int total_usuarios = 2;
 
 void limpiar_pantalla() {
 #ifdef _WIN32
@@ -68,13 +60,65 @@ int ventana_login(char* usuario_logueado) {
 }
 
 void ventana_registro() {
+    char nuevo_user[16];
+    char nuevo_pass[16];
+    char confirm_pass[16];
+    int resultado;
+
     limpiar_pantalla();
-    printf("  ╔══════════════════════════════════════════╗\n");
-    printf("  ║       REGISTRO DE NUEVO OPERARIO         ║\n");
-    printf("  ╚══════════════════════════════════════════╝\n");
-    printf("\n  [ Tarea: Implementar captura de datos de nuevo usuario ]\n");
-    printf("\n  Presione Enter para volver...");
-    getchar(); getchar();
+    printf(" ╔══════════════════════════════════════════╗\n");
+    printf(" ║ REGISTRO DE NUEVO OPERARIO              ║\n");
+    printf(" ╠══════════════════════════════════════════╣\n");
+    printf(" ╚══════════════════════════════════════════╝\n\n");
+
+    printf(" > Nuevo usuario (max 15 chars): ");
+    if (scanf("%15s", nuevo_user) != 1) {
+        while (getchar() != '\n');
+        return;
+    }
+
+    printf(" > Contrasena (max 15 chars): ");
+    if (scanf("%15s", nuevo_pass) != 1) {
+        while (getchar() != '\n');
+        return;
+    }
+
+    printf(" > Confirmar contrasena: ");
+    if (scanf("%15s", confirm_pass) != 1) {
+        while (getchar() != '\n');
+        return;
+    }
+
+    resultado = registrar_usuario(nuevo_user, nuevo_pass, confirm_pass);
+
+    limpiar_pantalla();
+    printf(" ╔══════════════════════════════════════════╗\n");
+    printf(" ║ REGISTRO DE NUEVO OPERARIO              ║\n");
+    printf(" ╠══════════════════════════════════════════╣\n");
+
+    switch (resultado) {
+        case 0:
+            printf(" ║ [OK] Operario registrado con exito.     ║\n");
+            printf(" ║ Usuario: %-29s║\n", nuevo_user);
+            break;
+        case -4:
+            printf(" ║ [!] Las contrasenas no coinciden.       ║\n");
+            break;
+        case -5:
+            printf(" ║ [!] Limite de operarios alcanzado.      ║\n");
+            break;
+        case -6:
+            printf(" ║ [!] El usuario ya existe.               ║\n");
+            break;
+        default:
+            printf(" ║ [!] Error al registrar el operario.     ║\n");
+            break;
+    }
+
+    printf(" ╚══════════════════════════════════════════╝\n");
+    printf("\n Presione Enter para volver...");
+    getchar();
+    getchar();
 }
 
 void ventana_acerca_de() {

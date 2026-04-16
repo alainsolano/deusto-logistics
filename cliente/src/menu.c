@@ -5,6 +5,7 @@
 #include <time.h>
 #include "logger.h"
 #include "../../compartido/protocolo.h"
+#include "usuarios.h"
 
 /* ── Prototipos internos ── */
 void limpiar_menu();
@@ -285,10 +286,7 @@ void ventana_historial() {
     getchar(); getchar();
 }
 
-typedef struct { char username[16]; char password[16]; } Usuario;
-extern Usuario db_usuarios[];
-extern int total_usuarios;
-extern void guardar_usuarios();
+
  
 void ventana_cambiar_contrasena(const char* id_operario) {
     char pass_actual[16], pass_nueva[16], pass_confirm[16];
@@ -358,6 +356,7 @@ void ventana_cambiar_contrasena(const char* id_operario) {
  
     /* Actualizar y persistir */
     strncpy(db_usuarios[idx].password, pass_nueva, 15);
+    db_usuarios[idx].password[15] = '\0';
     guardar_usuarios();
  
     /* Log del evento */
@@ -391,45 +390,75 @@ typedef struct {
 void ventana_resumen_stock() {
     ResumenProducto tabla[MAX_PRODUCTOS_RESUMEN];
     int total_prods = 0;
- 
+
     FILE *flog = fopen("logs/log.txt", "r");
- 
+
     if (flog != NULL) {
         char linea[256];
+
         while (fgets(linea, sizeof(linea), flog)) {
             char tipo_str[8] = "";
-            char producto[16]= "";
-            int  cantidad    = 0;
- 
-            if (sscanf(linea,
-                "%[^[][%7[^]]]%[^P]Producto=%-15s%*[^C]Cantidad=%d",
-                tipo_str, producto, &cantidad) != 3) continue;
- 
-            char *p = producto + strlen(producto) - 1;
-            while (p > producto && *p == ' ') { *p = '\0'; p--; }
- 
-            int idx = -1;
-            for (int i = 0; i < total_prods; i++) {
-                if (strcmp(tabla[i].id, producto) == 0) { idx = i; break; }
-            }
-            if (idx == -1) {
-                if (total_prods >= MAX_PRODUCTOS_RESUMEN) continue;
-                idx = total_prods++;
-                strncpy(tabla[idx].id, producto, 15);
-                tabla[idx].stock = tabla[idx].entradas = tabla[idx].salidas = 0;
-            }
- 
-            if (strncmp(tipo_str, "ENTRADA", 7) == 0) {
-                tabla[idx].stock    += cantidad;
-                tabla[idx].entradas += cantidad;
-            } else {
-                tabla[idx].stock    -= cantidad;
-                tabla[idx].salidas  += cantidad;
+            char producto[16] = "";
+            int cantidad = 0;
+
+            char *p_producto = strstr(linea, "Producto=");
+            char *p_cantidad = strstr(linea, "Cantidad=");
+            char *p_tipo = strstr(linea, "Tipo=");
+            char tipo_char;
+
+            if (p_producto != NULL && p_cantidad != NULL && p_tipo != NULL) {
+                if (sscanf(p_producto, "Producto=%15s", producto) == 1 &&
+                    sscanf(p_cantidad, "Cantidad=%d", &cantidad) == 1 &&
+                    sscanf(p_tipo, "Tipo=%c", &tipo_char) == 1) {
+
+                    if (tipo_char == 'E') {
+                        strcpy(tipo_str, "ENTRADA");
+                    } else if (tipo_char == 'S') {
+                        strcpy(tipo_str, "SALIDA");
+                    } else {
+                        continue;
+                    }
+
+                    if (strlen(producto) > 0) {
+                        char *p = producto + strlen(producto) - 1;
+                        while (p > producto && *p == ' ') {
+                            *p = '\0';
+                            p--;
+                        }
+                    }
+
+                    int idx = -1;
+                    for (int i = 0; i < total_prods; i++) {
+                        if (strcmp(tabla[i].id, producto) == 0) {
+                            idx = i;
+                            break;
+                        }
+                    }
+
+                    if (idx == -1) {
+                        if (total_prods >= MAX_PRODUCTOS_RESUMEN) continue;
+                        idx = total_prods++;
+                        strncpy(tabla[idx].id, producto, 15);
+                        tabla[idx].id[15] = '\0';
+                        tabla[idx].stock = 0;
+                        tabla[idx].entradas = 0;
+                        tabla[idx].salidas = 0;
+                    }
+
+                    if (strncmp(tipo_str, "ENTRADA", 7) == 0) {
+                        tabla[idx].stock += cantidad;
+                        tabla[idx].entradas += cantidad;
+                    } else {
+                        tabla[idx].stock -= cantidad;
+                        tabla[idx].salidas += cantidad;
+                    }
+                }
             }
         }
+
         fclose(flog);
     }
- 
+
     limpiar_menu();
     printf("  ╔══════════════════════════════════════════════════════════╗\n");
     printf("  ║               RESUMEN GENERAL DE STOCK                   ║\n");
@@ -437,17 +466,17 @@ void ventana_resumen_stock() {
     printf("  ║  %-15s  %6s  %8s  %7s  %-10s║\n",
         "PRODUCTO", "STOCK", "ENTRADAS", "SALIDAS", "ESTADO");
     printf("  ╠══════════════════════════════════════════════════════════╣\n");
- 
+
     if (total_prods == 0) {
         printf("  ║  [i] Sin datos en el log. Registre movimientos primero. ║\n");
     } else {
         for (int i = 0; i < total_prods; i++) {
             const char* estado;
             if      (tabla[i].stock <= 0)  estado = "SIN STOCK";
-            else if (tabla[i].stock <  10) estado = "CRITICO  ";
-            else if (tabla[i].stock <  50) estado = "BAJO     ";
+            else if (tabla[i].stock < 10)  estado = "CRITICO  ";
+            else if (tabla[i].stock < 50)  estado = "BAJO     ";
             else                           estado = "NORMAL   ";
- 
+
             printf("  ║  %-15s  %6d  %8d  %7d  %-10s║\n",
                 tabla[i].id,
                 tabla[i].stock,
@@ -456,7 +485,7 @@ void ventana_resumen_stock() {
                 estado);
         }
     }
- 
+
     printf("  ╠══════════════════════════════════════════════════════════╣\n");
     printf("  ║  Total productos detectados: %-27d║\n", total_prods);
     printf("  ╚══════════════════════════════════════════════════════════╝\n");
