@@ -6,69 +6,138 @@
 /* =========================================================
  * protocolo.h  —  Estructuras binarias compartidas
  * Cliente (C)  <-->  Servidor (C++)
- * Comunicación por sockets TCP/IP con tamaño fijo
+ *
+ * Comunicacion por sockets TCP/IP con structs de tamano fijo.
+ *
+ * MODELO DE MENSAJES
+ * ------------------
+ * Toda peticion empieza por una CabeceraPeticion (un int con el
+ * tipo). Segun el tipo, despues se envia la estructura concreta:
+ *
+ *   PETICION_LOGIN       -> LoginRequest      ->  LoginResponse
+ *   PETICION_REGISTRO    -> RegistroRequest   ->  RegistroResponse
+ *   PETICION_MOVIMIENTO  -> MovimientoStock   ->  RespuestaServidor
+ *   PETICION_CONSULTA    -> ConsultaRequest   ->  ConsultaResponse
+ *   PETICION_HISTORIAL   -> HistorialRequest  ->  int n + n HistorialItem
+ *   PETICION_RESUMEN     -> (sin cuerpo)      ->  int n + n ResumenItem
  * ========================================================= */
 
+#define HOST_SERVIDOR    "127.0.0.1"
 #define PUERTO_SERVIDOR  8080
 #define MAX_CLIENTES     10
 
-/* --- Códigos de respuesta del servidor --- */
-#define RESP_OK          0
-#define RESP_ERROR       1
+/* --- Codigos de respuesta del servidor --- */
+#define RESP_OK            0
+#define RESP_ERROR         1
 #define RESP_STOCK_CRITICO 2
 
-/* --- Tipos de operación sobre stock --- */
+/* --- Tipos de operacion sobre stock --- */
 #define OP_ENTRADA       'E'
 #define OP_SALIDA        'S'
-#define OP_CONSULTA      'C'
 
-/* --- Tipos de petición al servidor --- */
-#define PETICION_LOGIN   1
-#define PETICION_STOCK   2
+/* --- Tipos de peticion al servidor (CabeceraPeticion.tipo) --- */
+#define PETICION_LOGIN       1
+#define PETICION_MOVIMIENTO  2
+#define PETICION_CONSULTA    3
+#define PETICION_REGISTRO    4
+#define PETICION_HISTORIAL   5
+#define PETICION_RESUMEN     6
 
 /* =========================================================
- * LoginRequest — enviado por el cliente al iniciar sesión
+ * CabeceraPeticion — primer mensaje que identifica el tipo
+ * ========================================================= */
+typedef struct {
+    int32_t tipo;              /* PETICION_* */
+} CabeceraPeticion;
+
+/* =========================================================
+ * LOGIN
  * ========================================================= */
 typedef struct {
     char nombre_usuario[32];
-    char hash_contrasena[65];  /* SHA-256 hex string (64 chars + '\0') */
+    char contrasena[64];
 } LoginRequest;
 
-/* =========================================================
- * LoginResponse — respuesta del servidor al login
- * ========================================================= */
 typedef struct {
-    int  codigo;               /* RESP_OK | RESP_ERROR */
-    char rol[16];              /* "operario" | "admin" */
-    char nombre_completo[64];
-    char mensaje[64];
+    int32_t codigo;            /* RESP_OK | RESP_ERROR */
+    char    rol[16];           /* "operario" | "admin" */
+    char    nombre_completo[64];
+    char    mensaje[64];
 } LoginResponse;
 
 /* =========================================================
- * MovimientoStock — operación de stock enviada por el cliente
+ * REGISTRO DE OPERARIO
  * ========================================================= */
 typedef struct {
-    char  id_producto[16];
-    int   cantidad;
-    char  tipo_op;             /* 'E' | 'S' | 'C' */
-    long  timestamp;
-    char  id_operario[32];
-} MovimientoStock;
+    char nombre_usuario[32];
+    char contrasena[64];
+} RegistroRequest;
+
+typedef struct {
+    int32_t codigo;            /* RESP_OK | RESP_ERROR */
+    char    mensaje[96];
+} RegistroResponse;
 
 /* =========================================================
- * RespuestaServidor — respuesta del servidor a una operación
+ * MOVIMIENTO DE STOCK (entrada / salida)
  * ========================================================= */
 typedef struct {
-    int  codigo;               /* RESP_OK | RESP_ERROR | RESP_STOCK_CRITICO */
-    int  stock_actual;
-    char mensaje[64];
+    char    id_producto[16];
+    int32_t cantidad;
+    char    tipo_op;           /* 'E' | 'S' */
+    int64_t timestamp;
+    char    id_operario[32];
+} MovimientoStock;
+
+typedef struct {
+    int32_t codigo;            /* RESP_OK | RESP_ERROR | RESP_STOCK_CRITICO */
+    int32_t stock_actual;
+    char    mensaje[96];
 } RespuestaServidor;
 
 /* =========================================================
- * CabeceraPeticion — primer byte enviado para identificar tipo
+ * CONSULTA DE PRODUCTO (ficha)
  * ========================================================= */
 typedef struct {
-    int tipo;                  /* PETICION_LOGIN | PETICION_STOCK */
-} CabeceraPeticion;
+    char id_producto[16];
+} ConsultaRequest;
 
-#endif /* PROTOCOLO_H */
+typedef struct {
+    int32_t codigo;            /* RESP_OK | RESP_ERROR */
+    int32_t stock_actual;
+    int32_t entradas;
+    int32_t salidas;
+    int32_t stock_minimo;
+    char    nombre[64];
+    char    ubicacion[32];
+    char    mensaje[64];
+} ConsultaResponse;
+
+/* =========================================================
+ * HISTORIAL / AUDITORIA
+ * ========================================================= */
+typedef struct {
+    char filtro_producto[16]; 
+} HistorialRequest;
+
+typedef struct {
+    char    timestamp[24];
+    char    id_producto[16];
+    char    tipo_operacion[10];   /* "entrada" | "salida" */
+    int32_t cantidad;
+    int32_t stock_resultante;
+    char    operario[32];
+} HistorialItem;
+
+/* =========================================================
+ * RESUMEN GENERAL DE STOCK
+ * ========================================================= */
+typedef struct {
+    char    id_producto[16];
+    char    nombre[40];
+    int32_t stock;
+    int32_t stock_minimo;
+    char    estado[12];        /* "SIN STOCK" | "CRITICO" | "BAJO" | "NORMAL" */
+} ResumenItem;
+
+#endif
