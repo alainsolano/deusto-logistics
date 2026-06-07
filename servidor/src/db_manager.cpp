@@ -1,68 +1,139 @@
 #include "db_manager.h"
-#include <sqlite3.h>
 #include <iostream>
+#include <sqlite3.h>
+#include <cstring>
 
 static sqlite3* db = nullptr;
+
+static int obtener_id_usuario(const char* nombre_usuario) {
+    const char* sql = "SELECT id_usuario FROM USUARIOS WHERE nombre_usuario = ?;";
+    sqlite3_stmt* stmt = nullptr;
+    int id_usuario = -1;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, nombre_usuario, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        id_usuario = sqlite3_column_int(stmt, 0);
+    }
+
+    sqlite3_finalize(stmt);
+    return id_usuario;
+}
+
+int db_obtener_stock(const char* id_producto) {
+    const char* sql =
+        "SELECT cantidad_actual FROM PRODUCTOS WHERE id_producto = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int stock = 0;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return 0;
+    }
+
+    sqlite3_bind_text(stmt, 1, id_producto, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        stock = sqlite3_column_int(stmt, 0);
+    }
+
+    sqlite3_finalize(stmt);
+    return stock;
+}
 
 bool db_init(const char* ruta) {
     if (sqlite3_open(ruta, &db) != SQLITE_OK) {
         std::cerr << "Error abriendo BD: " << sqlite3_errmsg(db) << std::endl;
         return false;
     }
+
+    sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
+
     std::cout << "[BD] Archivo abierto: " << ruta << std::endl;
-
-    const char* sql =
-        "CREATE TABLE IF NOT EXISTS PRODUCTOS ("
-        "  id_producto TEXT PRIMARY KEY,"
-        "  nombre TEXT NOT NULL,"
-        "  cantidad_actual INTEGER NOT NULL DEFAULT 0,"
-        "  stock_minimo INTEGER NOT NULL DEFAULT 5"
-        ");"
-        "CREATE TABLE IF NOT EXISTS HISTORIAL_MOVIMIENTOS ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  id_producto TEXT NOT NULL,"
-        "  tipo_operacion TEXT NOT NULL,"
-        "  cantidad INTEGER NOT NULL,"
-        "  stock_resultante INTEGER NOT NULL,"
-        "  timestamp INTEGER NOT NULL,"
-        "  id_operario TEXT NOT NULL"
-        ");";
-
-    char* err = nullptr;
-    int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
-    if (rc != SQLITE_OK) {
-        std::cerr << "[BD] Error creando tablas: " << err << std::endl;
-        sqlite3_free(err);
-        return false;
-    }
-
-    std::cout << "[BD] Tablas creadas correctamente." << std::endl;
     return true;
 }
 
-bool db_registrar_movimiento(const MovimientoStock& mov, int stock_resultante) {
-    const char* sql =
-        "INSERT INTO HISTORIAL_MOVIMIENTOS "
-        "(id_producto, tipo_operacion, cantidad, stock_resultante, timestamp, id_operario) "
-        "VALUES (?, ?, ?, ?, ?, ?);";
+bool db_registrar_movimiento(const MovimientoStock& mov, int& stock_resultante) {
+    int id_usuario = obtener_id_usuario(mov.id_operario);
 
-    sqlite3_stmt* stmt;
-    sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
-    sqlite3_bind_text (stmt, 1, mov.id_producto, -1, SQLITE_STATIC);
-    sqlite3_bind_text (stmt, 2, mov.tipo_op == 'E' ? "entrada" : "salida", -1, SQLITE_STATIC);
-    sqlite3_bind_int  (stmt, 3, mov.cantidad);
-    sqlite3_bind_int  (stmt, 4, stock_resultante);
-    sqlite3_bind_int64(stmt, 5, mov.timestamp);
-    sqlite3_bind_text (stmt, 6, mov.id_operario, -1, SQLITE_STATIC);
-
-    bool ok = sqlite3_step(stmt) == SQLITE_DONE;
-    if (!ok) {
-        std::cerr << "[BD] Error insertando movimiento: " << sqlite3_errmsg(db) << std::endl;
+    if (id_usuario == -1) {
+        std::cerr << "[BD] Usuario no encontrado: " << mov.id_operario << std::endl;
+        return false;
     }
-    sqlite3_finalize(stmt);
+
+    int stock_actual = db_obtener_stock(mov.id_producto);
+
+    if (mov.tipo_op == 'E') {
+        stock_resultante = stock_actual + mov.cantidad;
+    } else if (mov.tipo_op == 'S') {
+        if (stock_actual < mov.cantidad) {
+            std::cerr << "[BD] Stock insuficiente para " << mov.id_producto << std::endl;
+            return false;
+        }
+        stock_resultante = stock_actual - mov.cantidad;
+    } else {
+        std::cerr << "[BD] Tipo de operacion no valido." << std::endl;
+        return false;
+    }
+
+    const char* sql_update =
+        "UPDATE PRODUCTOS SET cantidad_actual = ? WHERE id_producto = ?;";
+
+    sqlite3_stmt* stmt_update = nullptr;
+
+    if (sqlite3_prepare_v2(db, sql_update, -1, &stmt_update, nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_int(stmt_update, 1, stock_resultante);
+    sqlite3_bind_text(stmt_update, 2, mov.id_producto, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt_update) != SQLITE_DONE) {
+        sqlite3_finalize(stmt_update);
+        return false;
+    }
+
+    sqlite3_finalize(stmt_update);
+
+    const char* sql_insert =
+        "INSERT INTO HISTORIAL_MOVIMIENTOS "
+        "(id_producto, id_usuario, tipo_operacion, cantidad, stock_resultante, origen) "
+        "VALUES (?, ?, ?, ?, ?, 'manual');";
+
+    sqlite3_stmt* stmt_insert = nullptr;
+
+    if (sqlite3_prepare_v2(db, sql_insert, -1, &stmt_insert, nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    const char* tipo_operacion = (mov.tipo_op == 'E') ? "entrada" : "salida";
+
+    sqlite3_bind_text(stmt_insert, 1, mov.id_producto, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt_insert, 2, id_usuario);
+    sqlite3_bind_text(stmt_insert, 3, tipo_operacion, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt_insert, 4, mov.cantidad);
+    sqlite3_bind_int(stmt_insert, 5, stock_resultante);
+
+    bool ok = sqlite3_step(stmt_insert) == SQLITE_DONE;
+
+    if (!ok) {
+        std::cerr << "[BD] Error insertando movimiento: "
+                  << sqlite3_errmsg(db) << std::endl;
+    }
+
+    sqlite3_finalize(stmt_insert);
     return ok;
 }
 
 void db_close() {
-    if (db) sqlite3_close(db);
+    if (db) {
+        sqlite3_close(db);
+        db = nullptr;
+    }
 }
+
+

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstring>
 #include <vector>
+#include <cstring>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -65,7 +66,7 @@ int main() {
 
     std::cout << "DEUSTO LOGISTICS - SERVIDOR [Puerto 8080]" << std::endl;
 
-	db_init("datos/almacen.db");
+	db_init("datos/deusto_logistics.db");
 
     while(true) {
     new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
@@ -84,15 +85,43 @@ int main() {
                 break;
             }
 
-            if (bytes == sizeof(MovimientoStock)) {
-                std::cout << "\n[LOG] Movimiento: " << mov.id_producto 
-                        << " | Cantidad: " << mov.cantidad 
-                        << " | Op: " << mov.tipo_op << std::endl;
+           if (bytes == sizeof(MovimientoStock)) {
+    std::cout << "\n[LOG] Movimiento: " << mov.id_producto
+              << " | Cantidad: " << mov.cantidad
+              << " | Op: " << mov.tipo_op << std::endl;
 
-                db_registrar_movimiento(mov, 100);
-                RespuestaServidor res = {0, 100, "Operacion recibida correctamente"};
-                send(new_socket, (const char*)&res, sizeof(RespuestaServidor), 0);
-            }
+    int stock_resultante = 0;
+
+    bool ok = db_registrar_movimiento(mov, stock_resultante);
+
+    RespuestaServidor res;
+
+    if (ok) {
+        res.codigo = 0;
+        res.stock_actual = stock_resultante;
+
+        strncpy(res.mensaje,
+                "Operacion registrada correctamente",
+                sizeof(res.mensaje) - 1);
+
+        res.mensaje[sizeof(res.mensaje) - 1] = '\0';
+    }
+    else {
+        res.codigo = 1;
+        res.stock_actual = db_obtener_stock(mov.id_producto);
+
+        strncpy(res.mensaje,
+                "Error al registrar movimiento",
+                sizeof(res.mensaje) - 1);
+
+        res.mensaje[sizeof(res.mensaje) - 1] = '\0';
+    }
+
+    send(new_socket,
+         (const char*)&res,
+         sizeof(RespuestaServidor),
+         0);
+}
         }
 
     CLOSE_SOCKET(new_socket);
