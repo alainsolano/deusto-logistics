@@ -1,16 +1,18 @@
 # Ejecutables
 *.exe
 *.out
-servidor/servidor_app
-cliente/cliente_app
+servidor/servidor
+cliente/cliente
 
 # Objetos y librerías
 *.o
 *.a
 
-# Base de datos local
+# Base de datos local de pruebas
 datos/almacen.db
+
+# Fichero legacy de usuarios (ahora se gestionan en la BD del servidor)
+datos/usuarios.dat
 
 # Logs de sesión
 logs/*.log
-EOT
