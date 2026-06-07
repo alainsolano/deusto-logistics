@@ -4,9 +4,10 @@
 #include "menu.h"
 #include "usuario.h"
 #include "config.h"
-#include "db.h"
+#include "logger.h"
+#include "red.h"
 
-void limpiar_pantalla() {
+void limpiar_pantalla(void) {
 #ifdef _WIN32
     system("cls");
 #else
@@ -14,7 +15,7 @@ void limpiar_pantalla() {
 #endif
 }
 
-void ventana_bienvenida() {
+void ventana_bienvenida(void) {
     limpiar_pantalla();
     printf("  ╔══════════════════════════════════════════════════════╗\n");
     printf("  ║                DEUSTO LOGISTICS S.L.                 ║\n");
@@ -30,8 +31,9 @@ void ventana_bienvenida() {
     printf("  Seleccione su opcion: ");
 }
 
-int ventana_login(char* usuario_logueado) {
-    char user[16], pass[16];
+/* Devuelve: 1 = login OK | 0 = credenciales agotadas | -1 = se perdio el servidor */
+int ventana_login(socket_t sock, char *usuario_logueado) {
+    char user[32], pass[64];
     int intentos = 3;
 
     while (intentos > 0) {
@@ -41,113 +43,135 @@ int ventana_login(char* usuario_logueado) {
         printf("  ╚══════════════════════════════════════════╝\n\n");
         printf("  Intentos restantes: %d\n", intentos);
         printf("  > Usuario: ");
-        scanf("%15s", user);
+        if (scanf("%31s", user) != 1) { while (getchar() != '\n'); return 0; }
+        while (getchar() != '\n');  /* vaciar \n del buffer */
         printf("  > Contrasena: ");
-        scanf("%15s", pass);
+        leer_contrasena(pass, sizeof(pass));
 
-        for (int i = 0; i < total_usuarios; i++) {
-            if (strcmp(user, db_usuarios[i].username) == 0 &&
-                strcmp(pass, db_usuarios[i].password) == 0) {
-                strcpy(usuario_logueado, user);
-                return 1;
-            }
+        LoginResponse resp;
+        memset(&resp, 0, sizeof(resp));
+        if (red_login(sock, user, pass, &resp) != 0) {
+            log_error_conexion("Se perdio la conexion durante el login");
+            return -1;
+        }
+
+        log_login(user, resp.codigo == RESP_OK);
+
+        if (resp.codigo == RESP_OK) {
+            strncpy(usuario_logueado, user, 31);
+            usuario_logueado[31] = '\0';
+            printf("\n  [OK] Bienvenido, %s (%s).\n",
+                   resp.nombre_completo[0] ? resp.nombre_completo : user,
+                   resp.rol);
+            printf("  Presione Enter para continuar...");
+            getchar();
+            return 1;
         }
 
         intentos--;
-        printf("\n  [!] Credenciales incorrectas. Enter para reintentar...");
-        getchar();
+        printf("\n  [!] %s\n", resp.mensaje[0] ? resp.mensaje : "Credenciales incorrectas.");
+        printf("  Presione Enter para reintentar...");
         getchar();
     }
 
     return 0;
 }
 
-void ventana_registro() {
-    char nuevo_user[16];
-    char nuevo_pass[16];
-    char confirm_pass[16];
-    int resultado;
+/* Devuelve 0 si OK, -1 si se perdio el servidor */
+int ventana_registro(socket_t sock) {
+    char nuevo_user[32];
+    char nuevo_pass[64];
+    char confirm_pass[64];
 
     limpiar_pantalla();
     printf(" ╔══════════════════════════════════════════╗\n");
-    printf(" ║ REGISTRO DE NUEVO OPERARIO              ║\n");
-    printf(" ╠══════════════════════════════════════════╣\n");
+    printf(" ║       REGISTRO DE NUEVO OPERARIO         ║\n");
     printf(" ╚══════════════════════════════════════════╝\n\n");
 
-    printf(" > Nuevo usuario (max 15 chars): ");
-    if (scanf("%15s", nuevo_user) != 1) {
+    printf(" > Nuevo usuario (max 31 chars): ");
+    if (scanf("%31s", nuevo_user) != 1) {
         while (getchar() != '\n');
-        return;
+        return 0;
     }
+    while (getchar() != '\n');  /* vaciar \n del buffer */
 
-    printf(" > Contrasena (max 15 chars): ");
-    if (scanf("%15s", nuevo_pass) != 1) {
-        while (getchar() != '\n');
-        return;
-    }
+    printf(" > Contrasena: ");
+    leer_contrasena(nuevo_pass, sizeof(nuevo_pass));
 
     printf(" > Confirmar contrasena: ");
-    if (scanf("%15s", confirm_pass) != 1) {
-        while (getchar() != '\n');
-        return;
+    leer_contrasena(confirm_pass, sizeof(confirm_pass));
+
+    if (strcmp(nuevo_pass, confirm_pass) != 0) {
+        printf("\n [!] Las contrasenas no coinciden. Registro cancelado.\n");
+        printf("\n Presione Enter para volver...");
+        getchar();
+        return 0;
     }
 
-    resultado = registrar_usuario(nuevo_user, nuevo_pass, confirm_pass);
+    RegistroResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    if (red_registro(sock, nuevo_user, nuevo_pass, &resp) != 0) {
+        log_error_conexion("Se perdio la conexion durante el registro");
+        return -1;
+    }
+
+    {
+        char log_msg[160];
+        snprintf(log_msg, sizeof(log_msg),
+            "REGISTRO | usuario: %s | resultado: %s",
+            nuevo_user, resp.codigo == RESP_OK ? "OK" : "FALLIDO");
+        escribir_log(log_msg);
+    }
 
     limpiar_pantalla();
     printf(" ╔══════════════════════════════════════════╗\n");
-    printf(" ║ REGISTRO DE NUEVO OPERARIO              ║\n");
+    printf(" ║       REGISTRO DE NUEVO OPERARIO         ║\n");
     printf(" ╠══════════════════════════════════════════╣\n");
-
-    switch (resultado) {
-        case 0:
-            printf(" ║ [OK] Operario registrado con exito.     ║\n");
-            printf(" ║ Usuario: %-29s║\n", nuevo_user);
-            break;
-        case -4:
-            printf(" ║ [!] Las contrasenas no coinciden.       ║\n");
-            break;
-        case -5:
-            printf(" ║ [!] Limite de operarios alcanzado.      ║\n");
-            break;
-        case -6:
-            printf(" ║ [!] El usuario ya existe.               ║\n");
-            break;
-        default:
-            printf(" ║ [!] Error al registrar el operario.     ║\n");
-            break;
-    }
-
+    if (resp.codigo == RESP_OK)
+        printf(" ║ [OK] %-36s║\n", resp.mensaje[0] ? resp.mensaje : "Operario registrado.");
+    else
+        printf(" ║ [!] %-37s║\n", resp.mensaje[0] ? resp.mensaje : "Error al registrar.");
     printf(" ╚══════════════════════════════════════════╝\n");
     printf("\n Presione Enter para volver...");
     getchar();
-    getchar();
+    return 0;
 }
 
-void ventana_acerca_de() {
+void ventana_acerca_de(void) {
     limpiar_pantalla();
     printf("  ╔══════════════════════════════════════════╗\n");
     printf("  ║       DEUSTO LOGISTICS TERMINAL          ║\n");
     printf("  ╚══════════════════════════════════════════╝\n");
     printf("  \nAutor: Grupo 6\n");
+    printf("  Arquitectura: cliente (C) <--> servidor (C++) por TCP/IP\n");
     printf("\n  Presione Enter para volver...");
-    getchar();
     getchar();
 }
 
-int main() {
+int main(void) {
     int opcion;
-    char user_act[16];
+    char user_act[32];
 
     if (cargar_config("datos/config.txt") != 0) {
-        printf("Error: no se pudo cargar datos/config.txt\n");
+        printf("Aviso: no se pudo leer datos/config.txt, se usan valores por defecto.\n");
+    }
+
+    /* El cliente DEPENDE del servidor: sin conexion no se puede operar. */
+    if (red_iniciar() != 0) {
+        printf("Error: no se pudo inicializar la pila de red.\n");
         return 1;
     }
 
-    cargar_usuarios();
+    printf("Conectando con el servidor %s:%d ...\n",
+           g_config.host_servidor, g_config.puerto_servidor);
 
-    if (db_inicializar() != 0) {
-        printf("Error: no se pudo abrir la base de datos\n");
+    socket_t sock = red_conectar(g_config.host_servidor, g_config.puerto_servidor);
+    if (sock == SOCKET_INVALIDO) {
+        printf("\n  [X] No se puede conectar con el servidor en %s:%d.\n",
+               g_config.host_servidor, g_config.puerto_servidor);
+        printf("      Arranque el servidor e intentelo de nuevo.\n\n");
+        log_error_conexion("No se pudo conectar con el servidor al iniciar");
+        red_finalizar();
         return 1;
     }
 
@@ -159,27 +183,42 @@ int main() {
             continue;
         }
 
+        int rc = 0;
         switch (opcion) {
-            case 1:
-                if (ventana_login(user_act)) {
-                    menu_principal(0, user_act);
+            case 1: {
+                int r = ventana_login(sock, user_act);
+                if (r == 1) {
+                    rc = menu_principal(sock, user_act);
+                } else if (r == -1) {
+                    rc = -1;
                 }
                 break;
+            }
             case 2:
-                ventana_registro();
+                rc = ventana_registro(sock);
                 break;
             case 3:
                 ventana_acerca_de();
                 break;
             case 0:
+                red_cerrar(sock);
+                red_finalizar();
                 return 0;
             default:
                 printf("\n[!] Opcion no valida. Presione Enter para continuar...");
-                getchar();
-                getchar();
+                getchar(); getchar();
                 break;
+        }
+
+        if (rc == -1) {
+            printf("\n  [X] Se perdio la conexion con el servidor. El cliente se cerrara.\n");
+            red_cerrar(sock);
+            red_finalizar();
+            return 1;
         }
     }
 
+    red_cerrar(sock);
+    red_finalizar();
     return 0;
 }

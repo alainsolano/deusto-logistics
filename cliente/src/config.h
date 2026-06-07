@@ -2,11 +2,9 @@
 #define CONFIG_H
 
 typedef struct {
-    char ruta_log[128];
-    char ruta_usuarios[128];
-    char ruta_db[128];
-    char admin_user[32];
-    char admin_pass[32];
+    char ruta_log[128];        /* log local del cliente  */
+    char host_servidor[64];    /* IP o host del servidor */
+    int  puerto_servidor;      /* puerto TCP del servidor */
 } Config;
 
 extern Config g_config;

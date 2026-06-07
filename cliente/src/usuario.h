@@ -1,18 +1,13 @@
 #ifndef USUARIOS_H
 #define USUARIOS_H
 
-typedef struct {
-    char username[16];
-    char password[16];
-} Usuario;
+#ifdef _WIN32
+    #include <conio.h>
+#else
+    #include <termios.h>
+    #include <unistd.h>
+#endif
 
-#define MAX_USUARIOS 64
-
-extern Usuario db_usuarios[MAX_USUARIOS];
-extern int total_usuarios;
-
-void cargar_usuarios(void);
-void guardar_usuarios(void);
-int registrar_usuario(const char *nuevo_user, const char *nuevo_pass, const char *confirm_pass);
+void leer_contrasena(char *buf, int max_len);
 
 #endif

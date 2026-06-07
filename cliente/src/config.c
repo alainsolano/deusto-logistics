@@ -1,19 +1,20 @@
 #include "config.h"
+#include "../../compartido/protocolo.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 Config g_config = {
     "logs/log.txt",
-    "datos/usuarios.dat",
-    "datos/deusto_logistics.db",
-    "admin",
-    "admin"
+    HOST_SERVIDOR,
+    PUERTO_SERVIDOR
 };
 
+/* Quita el salto de linea final */
 static void quitar_salto(char *s) {
     size_t n = strlen(s);
-    if (n > 0 && s[n - 1] == '\n') {
-        s[n - 1] = '\0';
+    while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r')) {
+        s[--n] = '\0';
     }
 }
 
@@ -31,18 +32,14 @@ int cargar_config(const char *ruta) {
         if (strncmp(linea, "RUTA_LOG=", 9) == 0) {
             strncpy(g_config.ruta_log, linea + 9, sizeof(g_config.ruta_log) - 1);
             g_config.ruta_log[sizeof(g_config.ruta_log) - 1] = '\0';
-        } else if (strncmp(linea, "RUTA_USUARIOS=", 14) == 0) {
-            strncpy(g_config.ruta_usuarios, linea + 14, sizeof(g_config.ruta_usuarios) - 1);
-            g_config.ruta_usuarios[sizeof(g_config.ruta_usuarios) - 1] = '\0';
-        } else if (strncmp(linea, "RUTA_DB=", 8) == 0) {
-            strncpy(g_config.ruta_db, linea + 8, sizeof(g_config.ruta_db) - 1);
-            g_config.ruta_db[sizeof(g_config.ruta_db) - 1] = '\0';
-        } else if (strncmp(linea, "ADMIN_USER=", 11) == 0) {
-            strncpy(g_config.admin_user, linea + 11, sizeof(g_config.admin_user) - 1);
-            g_config.admin_user[sizeof(g_config.admin_user) - 1] = '\0';
-        } else if (strncmp(linea, "ADMIN_PASS=", 11) == 0) {
-            strncpy(g_config.admin_pass, linea + 11, sizeof(g_config.admin_pass) - 1);
-            g_config.admin_pass[sizeof(g_config.admin_pass) - 1] = '\0';
+        } else if (strncmp(linea, "HOST_SERVIDOR=", 14) == 0) {
+            strncpy(g_config.host_servidor, linea + 14, sizeof(g_config.host_servidor) - 1);
+            g_config.host_servidor[sizeof(g_config.host_servidor) - 1] = '\0';
+        } else if (strncmp(linea, "PUERTO_SERVIDOR=", 16) == 0) {
+            int p = atoi(linea + 16);
+            if (p > 0 && p < 65536) {
+                g_config.puerto_servidor = p;
+            }
         }
     }
 

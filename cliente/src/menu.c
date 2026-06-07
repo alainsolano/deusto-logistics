@@ -4,20 +4,18 @@
 #include <string.h>
 #include <time.h>
 #include "logger.h"
-#include "../../compartido/protocolo.h"
-#include "usuario.h"
-#include "db.h"
+#include "red.h"
 
-/* ── Prototipos internos ── */
-void limpiar_menu();
-void mostrar_ficha_producto(const char* id_prod);
-void ventana_operaciones(SOCKET_T sock, const char* id_operario);
-void ventana_historial();
+#define MAX_ITEMS 256
 
-/* ══════════════════════════════════════════════════════════
-   MENU PRINCIPAL
-   ══════════════════════════════════════════════════════════ */
-void menu_principal(SOCKET_T sock, const char* id_operario) {
+static void limpiar_menu(void);
+static int  ventana_operaciones(socket_t sock, const char *id_operario);
+static int  ventana_ficha(socket_t sock);
+static int  ventana_resumen_stock(socket_t sock);
+static int  ventana_historial(socket_t sock);
+
+/*    MENU PRINCIPAL */
+int menu_principal(socket_t sock, const char *id_operario) {
     int opcion;
     while (1) {
         limpiar_menu();
@@ -29,7 +27,8 @@ void menu_principal(SOCKET_T sock, const char* id_operario) {
         printf("  ║                                                          ║\n");
         printf("  ║  1. [MOVIMIENTO] Registrar Entrada/Salida                ║\n");
         printf("  ║  2. [INVENTARIO] Ver Ficha de Producto                   ║\n");
-        printf("  ║  3. [AUDITORIA]  Consultar Historial de Logs             ║\n");
+        printf("  ║  3. [STOCK]      Resumen General de Stock                ║\n");
+        printf("  ║  4. [AUDITORIA]  Consultar Historial                     ║\n");
         printf("  ║                                                          ║\n");
         printf("  ║  0. CERRAR SESION                                        ║\n");
         printf("  ║                                                          ║\n");
@@ -37,26 +36,30 @@ void menu_principal(SOCKET_T sock, const char* id_operario) {
         printf("  >> Seleccione una seccion: ");
 
         if (scanf("%d", &opcion) != 1) {
-            while(getchar() != '\n');
+            while (getchar() != '\n');
             continue;
         }
 
+        int rc = 0;
         switch (opcion) {
-            case 1: ventana_operaciones(sock, id_operario); break;
-            case 2: mostrar_ficha_producto(NULL);           break;
-            case 3: ventana_historial();                    break;
-            case 0: return;
+            case 1: rc = ventana_operaciones(sock, id_operario); break;
+            case 2: rc = ventana_ficha(sock);                    break;
+            case 3: rc = ventana_resumen_stock(sock);            break;
+            case 4: rc = ventana_historial(sock);                break;
+            case 0: return 0;
             default:
                 printf("\n  [!] Opcion no valida. Pulse Enter para continuar...");
                 getchar(); getchar();
         }
+
+        if (rc == -1) {
+            return -1;  /* conexion perdida: el cliente debe cerrarse */
+        }
     }
 }
 
-/* ══════════════════════════════════════════════════════════
-   UTILIDAD: limpiar pantalla
-   ══════════════════════════════════════════════════════════ */
-void limpiar_menu() {
+/*  limpiar pantalla */
+static void limpiar_menu(void) {
 #ifdef _WIN32
     system("cls");
 #else
@@ -64,11 +67,8 @@ void limpiar_menu() {
 #endif
 }
 
-/* ══════════════════════════════════════════════════════════
-   1. REGISTRO DE MOVIMIENTOS
-      Captura ID producto, tipo y cantidad, llama a escribir_log
-   ══════════════════════════════════════════════════════════ */
-void ventana_operaciones(SOCKET_T sock, const char* id_operario) {
+/*    1. REGISTRO DE MOVIMIENTOS  (entrada / salida via servidor) */
+static int ventana_operaciones(socket_t sock, const char *id_operario) {
     char id_prod[16];
     int  cantidad;
     int  tipo_sel;
@@ -85,402 +85,229 @@ void ventana_operaciones(SOCKET_T sock, const char* id_operario) {
     printf("  >> Opcion: ");
 
     if (scanf("%d", &tipo_sel) != 1 || tipo_sel == 0) {
-        while(getchar() != '\n');
-        return;
+        while (getchar() != '\n');
+        return 0;
     }
     if (tipo_sel != 1 && tipo_sel != 2) {
         printf("\n  [!] Opcion no valida. Pulse Enter para continuar...");
         getchar(); getchar();
-        return;
+        return 0;
     }
 
-    char tipo_op = (tipo_sel == 1) ? 'E' : 'S';
+    char tipo_op = (tipo_sel == 1) ? OP_ENTRADA : OP_SALIDA;
 
     printf("\n  >> ID de Producto (max 15 chars): ");
-    if (scanf("%15s", id_prod) != 1) { while(getchar()!='\n'); return; }
+    if (scanf("%15s", id_prod) != 1) { while (getchar() != '\n'); return 0; }
 
     printf("  >> Cantidad: ");
     if (scanf("%d", &cantidad) != 1 || cantidad <= 0) {
-        while(getchar() != '\n');
+        while (getchar() != '\n');
         printf("\n  [!] Cantidad invalida. Pulse Enter para continuar...");
         getchar(); getchar();
-        return;
+        return 0;
     }
 
-    /* Construir struct y registrar en log */
-     MovimientoStock mov;
+    /* Construir la peticion y enviarla al servidor */
+    MovimientoStock mov;
     memset(&mov, 0, sizeof(mov));
     strncpy(mov.id_producto, id_prod,     sizeof(mov.id_producto) - 1);
     strncpy(mov.id_operario, id_operario, sizeof(mov.id_operario) - 1);
-    mov.cantidad  = (int32_t)cantidad;
+    mov.cantidad  = cantidad;
     mov.tipo_op   = tipo_op;
     mov.timestamp = (int64_t)time(NULL);
 
-    char log_msg[128];
-    snprintf(log_msg, sizeof(log_msg),
-        "[%s] Operario=%-12s  Producto=%-15s  Tipo=%c  Cantidad=%d",
-        (tipo_op == 'E') ? "ENTRADA" : "SALIDA ",
-        mov.id_operario, mov.id_producto, mov.tipo_op, mov.cantidad);
+    RespuestaServidor resp;
+    memset(&resp, 0, sizeof(resp));
+    if (red_movimiento(sock, &mov, &resp) != 0) {
+        return -1;  /* conexion perdida */
+    }
 
-    escribir_log(log_msg);
-    if (db_insertar_movimiento(mov.id_producto, mov.cantidad, mov.tipo_op, mov.id_operario) != 0) {
-    printf("\n  [!] Error al guardar en la base de datos.");
-}
+    /* Log local del intento */
+    {
+        char log_msg[160];
+        snprintf(log_msg, sizeof(log_msg),
+            "%s | operario: %s | producto: %s | cantidad: %d | resultado: %s",
+            (tipo_op == OP_ENTRADA) ? "ENTRADA" : "SALIDA",
+            id_operario, id_prod, cantidad,
+            resp.codigo == RESP_OK ? "OK" : "RECHAZADO");
+        escribir_log(log_msg);
+    }
 
     /* Confirmacion visual */
     limpiar_menu();
     printf("  ╔══════════════════════════════════════════════════╗\n");
-    printf("  ║         MOVIMIENTO REGISTRADO [OK]               ║\n");
+    if (resp.codigo == RESP_OK)
+        printf("  ║         MOVIMIENTO REGISTRADO [OK]               ║\n");
+    else
+        printf("  ║         MOVIMIENTO RECHAZADO [!]                 ║\n");
     printf("  ╠══════════════════════════════════════════════════╣\n");
     printf("  ║  Producto  : %-33s║\n", mov.id_producto);
-    printf("  ║  Tipo      : %-33s║\n", (tipo_op=='E')?"ENTRADA (+stock)":"SALIDA  (-stock)");
+    printf("  ║  Tipo      : %-33s║\n",
+           (tipo_op == OP_ENTRADA) ? "ENTRADA (+stock)" : "SALIDA  (-stock)");
     printf("  ║  Cantidad  : %-33d║\n", mov.cantidad);
     printf("  ║  Operario  : %-33s║\n", mov.id_operario);
     printf("  ╠══════════════════════════════════════════════════╣\n");
-    printf("  ║  [OK] Guardado en logs/log.txt                   ║\n");
+    if (resp.codigo == RESP_OK)
+        printf("  ║  Stock actual: %-31d║\n", resp.stock_actual);
+    printf("  ║  %-48s║\n", resp.mensaje);
     printf("  ╚══════════════════════════════════════════════════╝\n");
     printf("\n  Presione Enter para volver...");
     getchar(); getchar();
+    return 0;
 }
 
-/* ══════════════════════════════════════════════════════════
-   2. INVENTARIO
-      Pide ID, calcula stock leyendo el log y muestra la ficha
-   ══════════════════════════════════════════════════════════ */
-void mostrar_ficha_producto(const char* id_prod_param) {
-    char id_buf[16];
-    const char* id_prod;
-
-    if (id_prod_param == NULL || id_prod_param[0] == '\0') {
-        limpiar_menu();
-        printf("  ╔══════════════════════════════════════════════════════════╗\n");
-        printf("  ║                  CONSULTA DE INVENTARIO                  ║\n");
-        printf("  ╚══════════════════════════════════════════════════════════╝\n");
-        printf("\n  >> ID de Producto a consultar (max 15 chars): ");
-        if (scanf("%15s", id_buf) != 1) { while(getchar()!='\n'); return; }
-        id_prod = id_buf;
-    } else {
-        id_prod = id_prod_param;
-    }
-
-    int stock = 0;
-    int entradas = 0;
-    int salidas = 0;
-
-db_obtener_stock(id_prod, &stock, &entradas, &salidas);
-
-    const char* estado;
-    if      (stock <= 0)  estado = "SIN STOCK";
-    else if (stock < 10)  estado = "CRITICO";
-    else if (stock < 50)  estado = "BAJO";
-    else                  estado = "NORMAL";
+/*  2. FICHA DE PRODUCTO  (consulta al servidor) */
+static int ventana_ficha(socket_t sock) {
+    char id_prod[16];
 
     limpiar_menu();
+    printf("  ╔══════════════════════════════════════════════════════════╗\n");
+    printf("  ║                  CONSULTA DE INVENTARIO                  ║\n");
+    printf("  ╚══════════════════════════════════════════════════════════╝\n");
+    printf("\n  >> ID de Producto a consultar (max 15 chars): ");
+    if (scanf("%15s", id_prod) != 1) { while (getchar() != '\n'); return 0; }
+
+    ConsultaResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    if (red_consulta(sock, id_prod, &resp) != 0) {
+        return -1;
+    }
+
+    {
+        char log_msg[128];
+        snprintf(log_msg, sizeof(log_msg),
+            "CONSULTA_STOCK | producto: %s | stock_actual: %d",
+            id_prod, resp.stock_actual);
+        escribir_log(log_msg);
+    }
+
+    limpiar_menu();
+
+    if (resp.codigo != RESP_OK) {
+        printf("  ┌──────────────────────────────────────────────────────────┐\n");
+        printf("  │ %-58s │\n", resp.mensaje[0] ? resp.mensaje : "Producto no encontrado.");
+        printf("  └──────────────────────────────────────────────────────────┘\n");
+        printf("\n  Presione Enter para volver...");
+        getchar(); getchar();
+        return 0;
+    }
+
+    const char *estado;
+    if      (resp.stock_actual <= 0)                  estado = "SIN STOCK";
+    else if (resp.stock_actual <  resp.stock_minimo)  estado = "CRITICO";
+    else if (resp.stock_actual <  resp.stock_minimo * 2) estado = "BAJO";
+    else                                              estado = "NORMAL";
+
     printf("  ┌──────────────────────────────────────────────────────────┐\n");
     printf("  │ DETALLE DE PRODUCTO: %-37s│\n", id_prod);
     printf("  ├──────────────────────────────────────────────────────────┤\n");
-    printf("  │  > Categoria: %-15s   > Pasillo: %-10s │\n", "Logistica", "A-12");
-    printf("  │  > Proveedor: %-15s   > Estante: %-10s │\n", "DeustoCorp", "04");
+    printf("  │  > Nombre:    %-43s│\n", resp.nombre);
+    printf("  │  > Ubicacion: %-15s   > Stock min.: %-10d │\n",
+           resp.ubicacion[0] ? resp.ubicacion : "-", resp.stock_minimo);
     printf("  ├──────────────────────────────────────────────────────────┤\n");
-    printf("  │  STOCK ACTUAL: [ %-5d unidades ]                        │\n", stock);
+    printf("  │  STOCK ACTUAL: [ %-5d unidades ]                        │\n", resp.stock_actual);
     printf("  │  ESTADO:       [ %-10s ]                            │\n", estado);
     printf("  ├──────────────────────────────────────────────────────────┤\n");
-    printf("  │  MOVIMIENTOS:  Entradas: %-5d  |  Salidas: %-5d        │\n", entradas, salidas);
+    printf("  │  MOVIMIENTOS:  Entradas: %-5d  |  Salidas: %-5d        │\n",
+           resp.entradas, resp.salidas);
     printf("  └──────────────────────────────────────────────────────────┘\n");
     printf("\n  Presione Enter para volver...");
     getchar(); getchar();
+    return 0;
 }
 
-/* ══════════════════════════════════════════════════════════
-   3. AUDITORIA
-      Lee logs/log.txt, permite filtrar por ID de producto
-   ══════════════════════════════════════════════════════════ */
-void ventana_historial() {
-    int opcion_filtro;
-    char filtro[32] = "";
+/* 3. RESUMEN GENERAL DE STOCK  (todos los productos del servidor) */
+static int ventana_resumen_stock(socket_t sock) {
+    static ResumenItem items[MAX_ITEMS];
+    int n = 0;
 
-    limpiar_menu();
-    printf("  ╔══════════════════════════════════════════════════════════╗\n");
-    printf("  ║                  AUDITORIA DE SISTEMA                    ║\n");
-    printf("  ╠══════════════════════════════════════════════════════════╣\n");
-    printf("  ║  Mostrar:                                                ║\n");
-    printf("  ║    [1] Todos los registros                               ║\n");
-    printf("  ║    [2] Filtrar por ID de producto                        ║\n");
-    printf("  ║    [0] Volver                                            ║\n");
-    printf("  ╚══════════════════════════════════════════════════════════╝\n");
-    printf("  >> Opcion: ");
-
-    if (scanf("%d", &opcion_filtro) != 1 || opcion_filtro == 0) {
-        while(getchar() != '\n');
-        return;
-    }
-
-    if (opcion_filtro == 2) {
-        printf("  >> ID de Producto a filtrar: ");
-        if (scanf("%31s", filtro) != 1) { while(getchar()!='\n'); return; }
-    }
-
-    FILE *flog = fopen("logs/log.txt", "r");
-
-    limpiar_menu();
-    printf("  ╔══════════════════════════════════════════════════════════╗\n");
-    if (filtro[0] != '\0')
-        printf("  ║  HISTORIAL DE LOGS — Filtro: %-27s║\n", filtro);
-    else
-        printf("  ║  HISTORIAL DE LOGS — Todos los registros             ║\n");
-    printf("  ╠══════════════════════════════════════════════════════════╣\n");
-
-    if (flog == NULL) {
-        printf("  ║  [!] No se encontro el archivo logs/log.txt          ║\n");
-        printf("  ║      Aun no hay movimientos registrados.             ║\n");
-    } else {
-        char linea[256];
-        int total = 0;
-
-        while (fgets(linea, sizeof(linea), flog)) {
-            size_t len = strlen(linea);
-            if (len > 0 && linea[len-1] == '\n') linea[len-1] = '\0';
-
-            if (filtro[0] != '\0' && strstr(linea, filtro) == NULL) continue;
-
-            char ts[24]      = "";
-            char cuerpo[220] = "";
-
-            if (sscanf(linea, "[%23[^]]] %219[^\n]", ts, cuerpo) == 2) {
-                printf("  ║  %s                                    ║\n", ts);
-                int pos = 0, clen = (int)strlen(cuerpo);
-                while (pos < clen) {
-                    char frag[57] = "";
-                    strncpy(frag, cuerpo + pos, 56);
-                    printf("  ║    %-54s  ║\n", frag);
-                    pos += 56;
-                }
-            } else {
-                printf("  ║  %-56.56s  ║\n", linea);
-            }
-            printf("  ╠══════════════════════════════════════════════════════════╣\n");
-            total++;
-        }
-        fclose(flog);
-
-        if (total == 0) {
-            if (filtro[0] != '\0')
-                printf("  ║  [i] Sin registros para: %-31s  ║\n", filtro);
-            else
-                printf("  ║  [i] El log esta vacio. Sin movimientos aun.         ║\n");
-            printf("  ╠══════════════════════════════════════════════════════════╣\n");
-        }
-        printf("  ║  Total registros mostrados: %-28d  ║\n", total);
-    }
-
-    printf("  ╚══════════════════════════════════════════════════════════╝\n");
-    printf("\n  Presione Enter para volver...");
-    getchar(); getchar();
-}
-
-
- 
-void ventana_cambiar_contrasena(const char* id_operario) {
-    char pass_actual[16], pass_nueva[16], pass_confirm[16];
- 
-    limpiar_menu();
-    printf("  ╔══════════════════════════════════════════╗\n");
-    printf("  ║         CAMBIAR CONTRASENA               ║\n");
-    printf("  ╠══════════════════════════════════════════╣\n");
-    printf("  ║  Operario: %-29s║\n", id_operario);
-    printf("  ╚══════════════════════════════════════════╝\n\n");
- 
-    printf("  > Contrasena actual:   ");
-    if (scanf("%15s", pass_actual) != 1) { while(getchar()!='\n'); return; }
- 
-    /* Verificar contraseña actual */
-    int idx = -1;
-    for (int i = 0; i < total_usuarios; i++) {
-        if (strcmp(id_operario, db_usuarios[i].username) == 0) {
-            idx = i;
-            break;
-        }
-    }
- 
-    if (idx == -1 || strcmp(pass_actual, db_usuarios[idx].password) != 0) {
-        limpiar_menu();
-        printf("  ╔══════════════════════════════════════════╗\n");
-        printf("  ║         CAMBIAR CONTRASENA               ║\n");
-        printf("  ╠══════════════════════════════════════════╣\n");
-        printf("  ║  [!] Contrasena actual incorrecta.       ║\n");
-        printf("  ║      Operacion cancelada.                ║\n");
-        printf("  ╚══════════════════════════════════════════╝\n");
-        printf("\n  Presione Enter para volver...");
-        getchar(); getchar();
-        return;
-    }
- 
-    printf("  > Nueva contrasena:    ");
-    if (scanf("%15s", pass_nueva) != 1) { while(getchar()!='\n'); return; }
-    printf("  > Confirmar contrasena:");
-    if (scanf("%15s", pass_confirm) != 1) { while(getchar()!='\n'); return; }
- 
-    if (strcmp(pass_nueva, pass_confirm) != 0) {
-        limpiar_menu();
-        printf("  ╔══════════════════════════════════════════╗\n");
-        printf("  ║         CAMBIAR CONTRASENA               ║\n");
-        printf("  ╠══════════════════════════════════════════╣\n");
-        printf("  ║  [!] Las contrasenas no coinciden.       ║\n");
-        printf("  ║      Operacion cancelada.                ║\n");
-        printf("  ╚══════════════════════════════════════════╝\n");
-        printf("\n  Presione Enter para volver...");
-        getchar(); getchar();
-        return;
-    }
- 
-    if (strlen(pass_nueva) < 4) {
-        limpiar_menu();
-        printf("  ╔══════════════════════════════════════════╗\n");
-        printf("  ║         CAMBIAR CONTRASENA               ║\n");
-        printf("  ╠══════════════════════════════════════════╣\n");
-        printf("  ║  [!] La contrasena debe tener            ║\n");
-        printf("  ║      al menos 4 caracteres.              ║\n");
-        printf("  ╚══════════════════════════════════════════╝\n");
-        printf("\n  Presione Enter para volver...");
-        getchar(); getchar();
-        return;
-    }
- 
-    /* Actualizar y persistir */
-    strncpy(db_usuarios[idx].password, pass_nueva, 15);
-    db_usuarios[idx].password[15] = '\0';
-    guardar_usuarios();
- 
-    /* Log del evento */
-    char log_msg[128];
-    snprintf(log_msg, sizeof(log_msg),
-        "[SEGURIDAD] Operario=%-12s  Accion=CAMBIO_CONTRASENA",
-        id_operario);
-    escribir_log(log_msg);
- 
-    limpiar_menu();
-    printf("  ╔══════════════════════════════════════════╗\n");
-    printf("  ║         CAMBIAR CONTRASENA               ║\n");
-    printf("  ╠══════════════════════════════════════════╣\n");
-    printf("  ║                                          ║\n");
-    printf("  ║  [OK] Contrasena actualizada con exito.  ║\n");
-    printf("  ║                                          ║\n");
-    printf("  ╚══════════════════════════════════════════╝\n");
-    printf("\n  Presione Enter para volver...");
-    getchar(); getchar();
-}
-
-#define MAX_PRODUCTOS_RESUMEN 64
- 
-typedef struct {
-    char id[16];
-    int  stock;
-    int  entradas;
-    int  salidas;
-} ResumenProducto;
- 
-void ventana_resumen_stock() {
-    ResumenProducto tabla[MAX_PRODUCTOS_RESUMEN];
-    int total_prods = 0;
-
-    FILE *flog = fopen("logs/log.txt", "r");
-
-    if (flog != NULL) {
-        char linea[256];
-
-        while (fgets(linea, sizeof(linea), flog)) {
-            char tipo_str[8] = "";
-            char producto[16] = "";
-            int cantidad = 0;
-
-            char *p_producto = strstr(linea, "Producto=");
-            char *p_cantidad = strstr(linea, "Cantidad=");
-            char *p_tipo = strstr(linea, "Tipo=");
-            char tipo_char;
-
-            if (p_producto != NULL && p_cantidad != NULL && p_tipo != NULL) {
-                if (sscanf(p_producto, "Producto=%15s", producto) == 1 &&
-                    sscanf(p_cantidad, "Cantidad=%d", &cantidad) == 1 &&
-                    sscanf(p_tipo, "Tipo=%c", &tipo_char) == 1) {
-
-                    if (tipo_char == 'E') {
-                        strcpy(tipo_str, "ENTRADA");
-                    } else if (tipo_char == 'S') {
-                        strcpy(tipo_str, "SALIDA");
-                    } else {
-                        continue;
-                    }
-
-                    if (strlen(producto) > 0) {
-                        char *p = producto + strlen(producto) - 1;
-                        while (p > producto && *p == ' ') {
-                            *p = '\0';
-                            p--;
-                        }
-                    }
-
-                    int idx = -1;
-                    for (int i = 0; i < total_prods; i++) {
-                        if (strcmp(tabla[i].id, producto) == 0) {
-                            idx = i;
-                            break;
-                        }
-                    }
-
-                    if (idx == -1) {
-                        if (total_prods >= MAX_PRODUCTOS_RESUMEN) continue;
-                        idx = total_prods++;
-                        strncpy(tabla[idx].id, producto, 15);
-                        tabla[idx].id[15] = '\0';
-                        tabla[idx].stock = 0;
-                        tabla[idx].entradas = 0;
-                        tabla[idx].salidas = 0;
-                    }
-
-                    if (strncmp(tipo_str, "ENTRADA", 7) == 0) {
-                        tabla[idx].stock += cantidad;
-                        tabla[idx].entradas += cantidad;
-                    } else {
-                        tabla[idx].stock -= cantidad;
-                        tabla[idx].salidas += cantidad;
-                    }
-                }
-            }
-        }
-
-        fclose(flog);
+    if (red_resumen(sock, items, MAX_ITEMS, &n) != 0) {
+        return -1;
     }
 
     limpiar_menu();
     printf("  ╔══════════════════════════════════════════════════════════╗\n");
     printf("  ║               RESUMEN GENERAL DE STOCK                   ║\n");
     printf("  ╠══════════════════════════════════════════════════════════╣\n");
-    printf("  ║  %-15s  %6s  %8s  %7s  %-10s║\n",
-        "PRODUCTO", "STOCK", "ENTRADAS", "SALIDAS", "ESTADO");
+    printf("  ║  %-12s %-22s %6s  %-10s║\n", "PRODUCTO", "NOMBRE", "STOCK", "ESTADO");
     printf("  ╠══════════════════════════════════════════════════════════╣\n");
 
-    if (total_prods == 0) {
-        printf("  ║  [i] Sin datos en el log. Registre movimientos primero. ║\n");
+    if (n == 0) {
+        printf("  ║  [i] No hay productos registrados en el sistema.        ║\n");
     } else {
-        for (int i = 0; i < total_prods; i++) {
-            const char* estado;
-            if      (tabla[i].stock <= 0)  estado = "SIN STOCK";
-            else if (tabla[i].stock < 10)  estado = "CRITICO  ";
-            else if (tabla[i].stock < 50)  estado = "BAJO     ";
-            else                           estado = "NORMAL   ";
-
-            printf("  ║  %-15s  %6d  %8d  %7d  %-10s║\n",
-                tabla[i].id,
-                tabla[i].stock,
-                tabla[i].entradas,
-                tabla[i].salidas,
-                estado);
+        for (int i = 0; i < n; i++) {
+            printf("  ║  %-12s %-22.22s %6d  %-10s║\n",
+                   items[i].id_producto, items[i].nombre,
+                   items[i].stock, items[i].estado);
         }
     }
 
     printf("  ╠══════════════════════════════════════════════════════════╣\n");
-    printf("  ║  Total productos detectados: %-27d║\n", total_prods);
+    printf("  ║  Total productos: %-39d║\n", n);
     printf("  ╚══════════════════════════════════════════════════════════╝\n");
     printf("\n  Presione Enter para volver...");
     getchar(); getchar();
+    return 0;
+}
+
+/*  4. AUDITORIA / HISTORIAL  (desde la BD del servidor) */
+static int ventana_historial(socket_t sock) {
+    int opcion_filtro;
+    char filtro[16] = "";
+
+    limpiar_menu();
+    printf("  ╔══════════════════════════════════════════════════════════╗\n");
+    printf("  ║                  AUDITORIA DE SISTEMA                    ║\n");
+    printf("  ╠══════════════════════════════════════════════════════════╣\n");
+    printf("  ║  Mostrar:                                                ║\n");
+    printf("  ║    [1] Todos los movimientos                             ║\n");
+    printf("  ║    [2] Filtrar por ID de producto                        ║\n");
+    printf("  ║    [0] Volver                                            ║\n");
+    printf("  ╚══════════════════════════════════════════════════════════╝\n");
+    printf("  >> Opcion: ");
+
+    if (scanf("%d", &opcion_filtro) != 1 || opcion_filtro == 0) {
+        while (getchar() != '\n');
+        return 0;
+    }
+
+    if (opcion_filtro == 2) {
+        printf("  >> ID de Producto a filtrar: ");
+        if (scanf("%15s", filtro) != 1) { while (getchar() != '\n'); return 0; }
+    }
+
+    static HistorialItem items[MAX_ITEMS];
+    int n = 0;
+    if (red_historial(sock, filtro, items, MAX_ITEMS, &n) != 0) {
+        return -1;
+    }
+
+    limpiar_menu();
+    printf("  ╔══════════════════════════════════════════════════════════╗\n");
+    if (filtro[0] != '\0')
+        printf("  ║  HISTORIAL — Filtro: %-35s║\n", filtro);
+    else
+        printf("  ║  HISTORIAL — Todos los movimientos                      ║\n");
+    printf("  ╠══════════════════════════════════════════════════════════╣\n");
+
+    if (n == 0) {
+        printf("  ║  [i] Sin movimientos registrados.                       ║\n");
+    } else {
+        for (int i = 0; i < n; i++) {
+            printf("  ║  %-19s %-9s %-10s %+5d -> %-5d ║\n",
+                   items[i].timestamp,
+                   items[i].id_producto,
+                   items[i].tipo_operacion,
+                   (items[i].tipo_operacion[0] == 'e') ? items[i].cantidad
+                                                       : -items[i].cantidad,
+                   items[i].stock_resultante);
+        }
+    }
+
+    printf("  ╠══════════════════════════════════════════════════════════╣\n");
+    printf("  ║  Total registros: %-39d║\n", n);
+    printf("  ╚══════════════════════════════════════════════════════════╝\n");
+    printf("\n  Presione Enter para volver...");
+    getchar(); getchar();
+    return 0;
 }

@@ -1,85 +1,45 @@
 #include "usuario.h"
 #include <stdio.h>
-#include <string.h>
-#include "config.h"
 
-Usuario db_usuarios[MAX_USUARIOS] = {
-    {"alain_s", "1234"},
-    {"admin", "admin"}
-};
+void leer_contrasena(char *buf, int max_len) {
+    int i = 0;
 
-int total_usuarios = 2;
-
-void cargar_usuarios(void) {
-    FILE *f = fopen(g_config.ruta_usuarios, "rb");
-    int n = 0;
-
-    if (f == NULL) {
-        return;
-    }
-
-    if (fread(&n, sizeof(int), 1, f) != 1) {
-        fclose(f);
-        return;
-    }
-
-    if (n >= 1 && n <= MAX_USUARIOS) {
-        total_usuarios = n;
-        fread(db_usuarios, sizeof(Usuario), total_usuarios, f);
-    }
-
-    fclose(f);
-}
-
-void guardar_usuarios(void) {
-    FILE *f = fopen(g_config.ruta_usuarios, "wb");
-
-    if (f == NULL) {
-        return;
-    }
-
-    fwrite(&total_usuarios, sizeof(int), 1, f);
-    fwrite(db_usuarios, sizeof(Usuario), total_usuarios, f);
-    fclose(f);
-}
-
-int registrar_usuario(const char *nuevo_user, const char *nuevo_pass, const char *confirm_pass) {
-    int i;
-
-    if (nuevo_user == NULL || nuevo_pass == NULL || confirm_pass == NULL) {
-        return -1;
-    }
-
-    if (strlen(nuevo_user) == 0 || strlen(nuevo_pass) == 0) {
-        return -2;
-    }
-
-    if (strlen(nuevo_user) > 15 || strlen(nuevo_pass) > 15) {
-        return -3;
-    }
-
-    if (strcmp(nuevo_pass, confirm_pass) != 0) {
-        return -4;
-    }
-
-    if (total_usuarios >= MAX_USUARIOS) {
-        return -5;
-    }
-
-    for (i = 0; i < total_usuarios; i++) {
-        if (strcmp(nuevo_user, db_usuarios[i].username) == 0) {
-            return -6;
+#ifdef _WIN32
+    int c;
+    while (i < max_len - 1) {
+        c = _getch();
+        if (c == '\r' || c == '\n') break;
+        if (c == '\b') {
+            if (i > 0) { i--; printf("\b \b"); }
+        } else {
+            buf[i++] = (char)c;
+            printf("*");
         }
     }
+    printf("\n");
+#else
+    struct termios old_t, new_t;
+    tcgetattr(STDIN_FILENO, &old_t);
+    new_t = old_t;
+    new_t.c_lflag &= ~(ECHO | ICANON);
+    new_t.c_cc[VMIN]  = 1;
+    new_t.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_t);
 
-    strncpy(db_usuarios[total_usuarios].username, nuevo_user, 15);
-    db_usuarios[total_usuarios].username[15] = '\0';
+    int c;
+    while (i < max_len - 1) {
+        c = getchar();
+        if (c == '\n' || c == EOF) break;
+        if (c == 127 || c == '\b') {   /* backspace */
+            if (i > 0) { i--; printf("\b \b"); fflush(stdout); }
+        } else {
+            buf[i++] = (char)c;
+            printf("*"); fflush(stdout);
+        }
+    }
+    printf("\n");
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_t);
+#endif
 
-    strncpy(db_usuarios[total_usuarios].password, nuevo_pass, 15);
-    db_usuarios[total_usuarios].password[15] = '\0';
-
-    total_usuarios++;
-    guardar_usuarios();
-
-    return 0;
+    buf[i] = '\0';
 }
