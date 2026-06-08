@@ -192,6 +192,7 @@ int main() {
         std::cerr << "No se pudo abrir la base de datos. Abortando." << std::endl;
         return -1;
     }
+    db_mostrar_costes_almacenamiento();
 
     SOCKET server_fd;
     struct sockaddr_in address;

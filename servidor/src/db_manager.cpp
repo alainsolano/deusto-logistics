@@ -4,6 +4,13 @@
 #include <cstring>
 #include <string>
 #include <mutex>
+#include "productoGenerico.h"
+#include "productoFragil.h"
+#include "productoInflamable.h"
+#include "producto_perecedero.h"
+
+#include <memory>
+#include <iomanip>
 
 static sqlite3* db = nullptr;
 static std::mutex g_db_mutex;  
@@ -372,4 +379,83 @@ int db_resumen(std::vector<ResumenItem>& out) {
     }
     sqlite3_finalize(stmt);
     return (int)out.size();
+}
+
+void db_mostrar_costes_almacenamiento() {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
+
+    const char* sql =
+        "SELECT p.id_producto, p.nombre, p.tipo, p.cantidad_actual, "
+        "p.stock_minimo, p.precio_unitario, p.estrategia_salida, "
+        "COALESCE(p.ubicacion_almacen,''), "
+        "COALESCE(f.coste_embalaje,0), COALESCE(f.instrucciones,''), "
+        "COALESCE(i.nivel_riesgo,0), COALESCE(i.zona_almacenamiento,''), "
+        "COALESCE(pe.fecha_caducidad,''), COALESCE(pe.temperatura_max,0) "
+        "FROM PRODUCTOS p "
+        "LEFT JOIN PRODUCTOS_FRAGILES f ON p.id_producto = f.id_producto "
+        "LEFT JOIN PRODUCTOS_INFLAMABLES i ON p.id_producto = i.id_producto "
+        "LEFT JOIN PRODUCTOS_PERECEDEROS pe ON p.id_producto = pe.id_producto "
+        "ORDER BY p.id_producto;";
+
+    sqlite3_stmt* stmt = nullptr;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cout << "[ERROR] No se pudieron consultar los costes.\n";
+        return;
+    }
+
+    std::cout << "\n===== COSTES DE ALMACENAMIENTO =====\n";
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        std::string id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+        std::string nombre = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        std::string tipo = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        int stock = sqlite3_column_int(stmt, 3);
+        int stock_minimo = sqlite3_column_int(stmt, 4);
+        double precio = sqlite3_column_double(stmt, 5);
+        std::string estrategia = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+        std::string ubicacion = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
+
+        std::unique_ptr<Producto> producto;
+
+        if (tipo == "generico") {
+            producto = std::make_unique<ProductoGenerico>(
+                id, nombre, stock, stock_minimo, precio, estrategia, ubicacion
+            );
+        }
+        else if (tipo == "fragil") {
+            double coste_embalaje = sqlite3_column_double(stmt, 8);
+            std::string instrucciones = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
+
+            producto = std::make_unique<ProductoFragil>(
+                id, nombre, stock, stock_minimo, precio, estrategia, ubicacion,
+                coste_embalaje, instrucciones
+            );
+        }
+        else if (tipo == "inflamable") {
+            int nivel_riesgo = sqlite3_column_int(stmt, 10);
+            std::string zona = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 11));
+
+            producto = std::make_unique<ProductoInflamable>(
+                id, nombre, stock, stock_minimo, precio, estrategia, ubicacion,
+                nivel_riesgo, zona
+            );
+        }
+        else if (tipo == "perecedero") {
+            std::string fecha = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 12));
+            double temperatura = sqlite3_column_double(stmt, 13);
+
+            producto = std::make_unique<ProductoPerecedero>(
+                id, nombre, stock, stock_minimo, precio, estrategia, ubicacion,
+                fecha, temperatura
+            );
+        }
+
+        if (producto) {
+            std::cout << *producto << "\n";
+            std::cout << "-------------------------------------\n";
+        }
+    }
+
+    sqlite3_finalize(stmt);
 }
