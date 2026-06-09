@@ -150,16 +150,35 @@ static void atender_cliente(SOCKET cli, std::string ip) {
                         n, ip.c_str());
                 break;
             }
-            case PETICION_RESUMEN: {
-                std::vector<ResumenItem> items;
-                int32_t n = (int32_t)db_resumen(items);
-                if (!enviar_todo(cli, &n, sizeof(n))) goto fin;
-                for (const auto& it : items) {
-                    if (!enviar_todo(cli, &it, sizeof(it))) goto fin;
-                }
-                log_srv("RESUMEN | productos: %d | ip: %s", n, ip.c_str());
-                break;
-            }
+           case PETICION_RESUMEN: {
+    std::vector<ResumenItem> items;
+    int32_t n = (int32_t)db_resumen(items);
+    if (!enviar_todo(cli, &n, sizeof(n))) goto fin;
+    for (const auto& it : items) {
+        if (!enviar_todo(cli, &it, sizeof(it))) goto fin;
+    }
+    log_srv("RESUMEN | productos: %d | ip: %s", n, ip.c_str());
+    break;
+}
+
+case PETICION_ALTA_PRODUCTO: {
+    AltaProductoRequest req;
+    if (!recibir_todo(cli, &req, sizeof(req))) goto fin;
+
+    AltaProductoResponse resp;
+    db_alta_producto(req, resp);
+
+    log_srv("ALTA_PRODUCTO | producto: %s | tipo: %s | resultado: %s | ip: %s",
+            req.id_producto,
+            req.tipo,
+            resp.codigo == RESP_OK ? "OK" : "ERROR",
+            ip.c_str());
+
+    if (!enviar_todo(cli, &resp, sizeof(resp))) goto fin;
+    break;
+}
+
+
             default:
                 log_srv("PETICION_DESCONOCIDA | tipo: %d | ip: %s",
                         cab.tipo, ip.c_str());

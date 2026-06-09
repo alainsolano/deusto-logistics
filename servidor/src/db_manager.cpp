@@ -459,3 +459,91 @@ void db_mostrar_costes_almacenamiento() {
 
     sqlite3_finalize(stmt);
 }
+
+void db_alta_producto(const AltaProductoRequest& req,
+                      AltaProductoResponse& resp)
+{
+    memset(&resp, 0, sizeof(resp));
+
+    sqlite3_stmt* stmt = nullptr;
+
+    const char* sql =
+        "INSERT INTO PRODUCTOS "
+        "(id_producto, nombre, tipo, cantidad_actual, stock_minimo, "
+        "precio_unitario, estrategia_salida, ubicacion_almacen) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        resp.codigo = RESP_ERROR;
+        strcpy(resp.mensaje, "Error preparando producto");
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, req.id_producto, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, req.nombre, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, req.tipo, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 4, req.cantidad_actual);
+    sqlite3_bind_int(stmt, 5, req.stock_minimo);
+    sqlite3_bind_double(stmt, 6, req.precio_unitario);
+    sqlite3_bind_text(stmt, 7, req.estrategia_salida, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 8, req.ubicacion_almacen, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+        resp.codigo = RESP_ERROR;
+        strcpy(resp.mensaje, "Producto duplicado o invalido");
+        return;
+    }
+
+    sqlite3_finalize(stmt);
+
+    if (strcmp(req.tipo, "fragil") == 0) {
+        const char* sql_f =
+            "INSERT INTO PRODUCTOS_FRAGILES "
+            "(id_producto, coste_embalaje, instrucciones) "
+            "VALUES (?, ?, ?);";
+
+        if (sqlite3_prepare_v2(db, sql_f, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, req.id_producto, -1, SQLITE_STATIC);
+            sqlite3_bind_double(stmt, 2, req.coste_embalaje);
+            sqlite3_bind_text(stmt, 3, req.instrucciones, -1, SQLITE_STATIC);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    if (strcmp(req.tipo, "inflamable") == 0) {
+        const char* sql_i =
+            "INSERT INTO PRODUCTOS_INFLAMABLES "
+            "(id_producto, nivel_riesgo, zona_almacenamiento) "
+            "VALUES (?, ?, ?);";
+
+        if (sqlite3_prepare_v2(db, sql_i, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, req.id_producto, -1, SQLITE_STATIC);
+            sqlite3_bind_int(stmt, 2, req.nivel_riesgo);
+            sqlite3_bind_text(stmt, 3, req.zona_almacenamiento, -1, SQLITE_STATIC);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    if (strcmp(req.tipo, "perecedero") == 0) {
+        const char* sql_p =
+            "INSERT INTO PRODUCTOS_PERECEDEROS "
+            "(id_producto, fecha_caducidad, temperatura_max) "
+            "VALUES (?, ?, ?);";
+
+        if (sqlite3_prepare_v2(db, sql_p, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, req.id_producto, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, req.fecha_caducidad, -1, SQLITE_STATIC);
+            sqlite3_bind_double(stmt, 3, req.temperatura_max);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    resp.codigo = RESP_OK;
+    strcpy(resp.mensaje, "Producto creado correctamente");
+}
+
+

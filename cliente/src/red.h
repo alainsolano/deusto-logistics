@@ -50,4 +50,6 @@ int red_historial(socket_t s, const char *filtro_producto,
 /* Resumen: igual que historial pero sin filtro. */
 int red_resumen  (socket_t s, ResumenItem *items, int max_items, int *n_items);
 
+int red_alta_producto(socket_t s, const AltaProductoRequest *req, AltaProductoResponse *resp);
+
 #endif

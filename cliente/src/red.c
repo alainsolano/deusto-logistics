@@ -188,3 +188,19 @@ int red_resumen(socket_t s, ResumenItem *items, int max_items, int *n_items) {
     *n_items = recibidos;
     return 0;
 }
+
+int red_alta_producto(socket_t s, const AltaProductoRequest *req, AltaProductoResponse *resp) {
+    if (enviar_cabecera(s, PETICION_ALTA_PRODUCTO) != 0) {
+        return -1;
+    }
+
+    if (enviar_todo(s, req, sizeof(*req)) != 0) {
+        return -1;
+    }
+
+    if (recibir_todo(s, resp, sizeof(*resp)) != 0) {
+        return -1;
+    }
+
+    return 0;
+}

@@ -42,6 +42,7 @@
 #define PETICION_REGISTRO    4
 #define PETICION_HISTORIAL   5
 #define PETICION_RESUMEN     6
+#define PETICION_ALTA_PRODUCTO 7
 
 /* =========================================================
  * CabeceraPeticion — primer mensaje que identifica el tipo
@@ -139,5 +140,34 @@ typedef struct {
     int32_t stock_minimo;
     char    estado[12];        /* "SIN STOCK" | "CRITICO" | "BAJO" | "NORMAL" */
 } ResumenItem;
+
+/* =========================================================
+ * ALTA DE NUEVO PRODUCTO
+ * ========================================================= */
+typedef struct {
+    char id_producto[16];
+    char nombre[64];
+    char tipo[16];              /* generico | fragil | inflamable | perecedero */
+
+    int32_t cantidad_actual;
+    int32_t stock_minimo;
+    double precio_unitario;
+    char estrategia_salida[8];   /* FIFO | LIFO */
+    char ubicacion_almacen[32];
+
+    double coste_embalaje;
+    char instrucciones[128];
+
+    int32_t nivel_riesgo;
+    char zona_almacenamiento[32];
+
+    char fecha_caducidad[16];
+    double temperatura_max;
+} AltaProductoRequest;
+
+typedef struct {
+    int32_t codigo;              /* RESP_OK | RESP_ERROR */
+    char mensaje[96];
+} AltaProductoResponse;
 
 #endif

@@ -13,6 +13,7 @@ static int  ventana_operaciones(socket_t sock, const char *id_operario);
 static int  ventana_ficha(socket_t sock);
 static int  ventana_resumen_stock(socket_t sock);
 static int  ventana_historial(socket_t sock);
+static int ventana_alta_producto(socket_t sock);
 
 /*    MENU PRINCIPAL */
 int menu_principal(socket_t sock, const char *id_operario) {
@@ -29,7 +30,7 @@ int menu_principal(socket_t sock, const char *id_operario) {
         printf("  ║  2. [INVENTARIO] Ver Ficha de Producto                   ║\n");
         printf("  ║  3. [STOCK]      Resumen General de Stock                ║\n");
         printf("  ║  4. [AUDITORIA]  Consultar Historial                     ║\n");
-        printf("  ║                                                          ║\n");
+        printf("  ║  5. [CATALOGO]   Añadir Nuevo Producto                   ║\n");
         printf("  ║  0. CERRAR SESION                                        ║\n");
         printf("  ║                                                          ║\n");
         printf("  ╚══════════════════════════════════════════════════════════╝\n");
@@ -46,6 +47,7 @@ int menu_principal(socket_t sock, const char *id_operario) {
             case 2: rc = ventana_ficha(sock);                    break;
             case 3: rc = ventana_resumen_stock(sock);            break;
             case 4: rc = ventana_historial(sock);                break;
+            case 5: rc = ventana_alta_producto(sock);            break;
             case 0: return 0;
             default:
                 printf("\n  [!] Opcion no valida. Pulse Enter para continuar...");
@@ -309,5 +311,182 @@ static int ventana_historial(socket_t sock) {
     printf("  ╚══════════════════════════════════════════════════════════╝\n");
     printf("\n  Presione Enter para volver...");
     getchar(); getchar();
+    return 0;
+}
+
+
+
+
+static int ventana_alta_producto(socket_t sock) {
+    AltaProductoRequest req;
+    AltaProductoResponse resp;
+    int tipo_sel;
+    int estrategia_sel;
+
+    memset(&req, 0, sizeof(req));
+    memset(&resp, 0, sizeof(resp));
+
+    limpiar_menu();
+
+    printf(" ╔══════════════════════════════════════════════════╗\n");
+    printf(" ║           ALTA DE NUEVO PRODUCTO                 ║\n");
+    printf(" ╠══════════════════════════════════════════════════╣\n");
+    printf(" ║ Tipo de producto:                                ║\n");
+    printf(" ║   [1] Generico                                   ║\n");
+    printf(" ║   [2] Fragil                                     ║\n");
+    printf(" ║   [3] Inflamable                                 ║\n");
+    printf(" ║   [4] Perecedero                                 ║\n");
+    printf(" ║   [0] Volver                                     ║\n");
+    printf(" ╚══════════════════════════════════════════════════╝\n");
+    printf(" >> Opcion: ");
+
+    if (scanf("%d", &tipo_sel) != 1 || tipo_sel == 0) {
+        while (getchar() != '\n');
+        return 0;
+    }
+
+    if (tipo_sel < 1 || tipo_sel > 4) {
+        printf("\n [!] Tipo no valido. Pulse Enter para continuar...");
+        getchar();
+        getchar();
+        return 0;
+    }
+
+    if (tipo_sel == 1) {
+        strncpy(req.tipo, "generico", sizeof(req.tipo) - 1);
+    } else if (tipo_sel == 2) {
+        strncpy(req.tipo, "fragil", sizeof(req.tipo) - 1);
+    } else if (tipo_sel == 3) {
+        strncpy(req.tipo, "inflamable", sizeof(req.tipo) - 1);
+    } else if (tipo_sel == 4) {
+        strncpy(req.tipo, "perecedero", sizeof(req.tipo) - 1);
+    }
+
+    printf("\n >> ID producto (ej. PROD-0060): ");
+    if (scanf("%15s", req.id_producto) != 1) {
+        while (getchar() != '\n');
+        return 0;
+    }
+
+    printf(" >> Nombre producto: ");
+    if (scanf(" %63[^\n]", req.nombre) != 1) {
+        while (getchar() != '\n');
+        return 0;
+    }
+
+    printf(" >> Stock inicial: ");
+    if (scanf("%d", &req.cantidad_actual) != 1 || req.cantidad_actual < 0) {
+        while (getchar() != '\n');
+        printf("\n [!] Stock invalido. Pulse Enter...");
+        getchar();
+        getchar();
+        return 0;
+    }
+
+    printf(" >> Stock minimo: ");
+    if (scanf("%d", &req.stock_minimo) != 1 || req.stock_minimo < 0) {
+        while (getchar() != '\n');
+        printf("\n [!] Stock minimo invalido. Pulse Enter...");
+        getchar();
+        getchar();
+        return 0;
+    }
+
+    printf(" >> Precio unitario: ");
+    if (scanf("%lf", &req.precio_unitario) != 1 || req.precio_unitario <= 0) {
+        while (getchar() != '\n');
+        printf("\n [!] Precio invalido. Pulse Enter...");
+        getchar();
+        getchar();
+        return 0;
+    }
+
+    printf(" >> Estrategia salida [1] FIFO [2] LIFO: ");
+    if (scanf("%d", &estrategia_sel) != 1) {
+        while (getchar() != '\n');
+        return 0;
+    }
+
+    if (estrategia_sel == 2) {
+        strncpy(req.estrategia_salida, "LIFO", sizeof(req.estrategia_salida) - 1);
+    } else {
+        strncpy(req.estrategia_salida, "FIFO", sizeof(req.estrategia_salida) - 1);
+    }
+
+    printf(" >> Ubicacion almacen: ");
+    if (scanf("%31s", req.ubicacion_almacen) != 1) {
+        while (getchar() != '\n');
+        return 0;
+    }
+
+    if (tipo_sel == 2) {
+        printf(" >> Coste embalaje: ");
+        if (scanf("%lf", &req.coste_embalaje) != 1 || req.coste_embalaje < 0) {
+            while (getchar() != '\n');
+            return 0;
+        }
+
+        printf(" >> Instrucciones: ");
+        if (scanf(" %127[^\n]", req.instrucciones) != 1) {
+            while (getchar() != '\n');
+            return 0;
+        }
+    }
+
+    if (tipo_sel == 3) {
+        printf(" >> Nivel riesgo [1-3]: ");
+        if (scanf("%d", &req.nivel_riesgo) != 1 || req.nivel_riesgo < 1 || req.nivel_riesgo > 3) {
+            while (getchar() != '\n');
+            printf("\n [!] Nivel de riesgo invalido. Pulse Enter...");
+            getchar();
+            getchar();
+            return 0;
+        }
+
+        printf(" >> Zona almacenamiento: ");
+        if (scanf("%31s", req.zona_almacenamiento) != 1) {
+            while (getchar() != '\n');
+            return 0;
+        }
+    }
+
+    if (tipo_sel == 4) {
+        printf(" >> Fecha caducidad (YYYY-MM-DD): ");
+        if (scanf("%15s", req.fecha_caducidad) != 1) {
+            while (getchar() != '\n');
+            return 0;
+        }
+
+        printf(" >> Temperatura maxima: ");
+        if (scanf("%lf", &req.temperatura_max) != 1) {
+            while (getchar() != '\n');
+            return 0;
+        }
+    }
+
+    if (red_alta_producto(sock, &req, &resp) != 0) {
+        return -1;
+    }
+
+    limpiar_menu();
+
+    printf(" ╔══════════════════════════════════════════════════╗\n");
+    printf(" ║             RESULTADO ALTA PRODUCTO              ║\n");
+    printf(" ╠══════════════════════════════════════════════════╣\n");
+    printf(" ║ Producto: %-37s║\n", req.id_producto);
+    printf(" ║ Tipo    : %-37s║\n", req.tipo);
+    printf(" ╠══════════════════════════════════════════════════╣\n");
+
+    if (resp.codigo == RESP_OK) {
+        printf(" ║ [OK] %-42s║\n", resp.mensaje);
+    } else {
+        printf(" ║ [!] %-42s║\n", resp.mensaje);
+    }
+
+    printf(" ╚══════════════════════════════════════════════════╝\n");
+    printf("\n Presione Enter para volver...");
+    getchar();
+    getchar();
+
     return 0;
 }

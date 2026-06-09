@@ -15,3 +15,5 @@ void db_consulta  (const ConsultaRequest& req, ConsultaResponse& resp);
 int  db_historial (const HistorialRequest& req, std::vector<HistorialItem>& out);
 int  db_resumen   (std::vector<ResumenItem>& out);
 void db_mostrar_costes_almacenamiento();
+void db_alta_producto(const AltaProductoRequest& req,
+                      AltaProductoResponse& resp);

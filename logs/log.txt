@@ -7,3 +7,9 @@
 [2026-04-13 12:13:40] [ENTRADA] Operario=admin         Producto=prod-0042        Tipo=E  Cantidad=23
 [2026-04-13 12:15:40] [SALIDA ] Operario=admin         Producto=Prod-0042        Tipo=S  Cantidad=12
 [2026-04-13 12:16:04] [ENTRADA] Operario=admin         Producto=prod-001         Tipo=E  Cantidad=12
+[2026-06-09 17:51:11] LOGIN | usuario: admin | resultado: OK
+[2026-06-09 17:53:21] CONSULTA_STOCK | producto: PROD-0042 | stock_actual: 90
+[2026-06-09 17:56:36] SALIDA | operario: admin | producto: PROD-0045 | cantidad: 15 | resultado: OK
+[2026-06-09 17:57:31] ENTRADA | operario: admin | producto: PROD-0045 | cantidad: 25 | resultado: OK
+[2026-06-09 17:58:09] ENTRADA | operario: admin | producto: PROD-0012 | cantidad: 5 | resultado: RECHAZADO
+[2026-06-09 18:32:43] LOGIN | usuario: admin | resultado: OK
