@@ -23,15 +23,19 @@ CLIENTE_SRCS = $(CLIENTE_DIR)/main.c    \
                $(CLIENTE_DIR)/red.c
 
 SERVIDOR_SRCS = $(SERVIDOR_DIR)/main.cpp \
-                $(SERVIDOR_DIR)/db_manager.cpp
+                $(SERVIDOR_DIR)/db_manager.cpp \
+                $(SERVIDOR_DIR)/producto.cpp \
+                $(SERVIDOR_DIR)/productoGenerico.cpp \
+                $(SERVIDOR_DIR)/productoFragil.cpp \
+                $(SERVIDOR_DIR)/productoInflamable.cpp \
+                $(SERVIDOR_DIR)/producto_perecedero.cpp
 
 # --- Binarios ------------------------------------------------
 CLIENTE_BIN  = cliente/cliente
 SERVIDOR_BIN = servidor/servidor
 
 # --- Objetos -------------------------------------------------
-SERVIDOR_OBJS = $(SERVIDOR_DIR)/main.o \
-                $(SERVIDOR_DIR)/db_manager.o
+SERVIDOR_OBJS = $(SERVIDOR_SRCS:.cpp=.o)
 
 # ============================================================
 .PHONY: all cliente servidor clean
@@ -47,10 +51,7 @@ $(CLIENTE_BIN): $(CLIENTE_SRCS)
 # --- Servidor (C++) -----------------------------------------
 servidor: $(SERVIDOR_BIN)
 
-$(SERVIDOR_DIR)/main.o: $(SERVIDOR_DIR)/main.cpp
-	$(CXX) $(CXXFLAGS) -I$(COMP_DIR) -c $< -o $@
-
-$(SERVIDOR_DIR)/db_manager.o: $(SERVIDOR_DIR)/db_manager.cpp
+$(SERVIDOR_DIR)/%.o: $(SERVIDOR_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -I$(COMP_DIR) -c $< -o $@
 
 $(SERVIDOR_BIN): $(SERVIDOR_OBJS)

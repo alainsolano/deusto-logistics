@@ -3,6 +3,9 @@
 *.out
 servidor/servidor
 cliente/cliente
+cliente_app
+servidor_app
+cliente/cliente_app
 
 # Objetos y librerías
 *.o
@@ -11,7 +14,7 @@ cliente/cliente
 # Base de datos local de pruebas
 datos/almacen.db
 
-# Fichero legacy de usuarios (ahora se gestionan en la BD del servidor)
+# Fichero de usuarios (ahora se gestionan en la BD del servidor)
 datos/usuarios.dat
 
 # Logs de sesión
