@@ -33,12 +33,16 @@ SERVIDOR_SRCS = $(SERVIDOR_DIR)/main.cpp \
 # --- Binarios ------------------------------------------------
 CLIENTE_BIN  = cliente/cliente
 SERVIDOR_BIN = servidor/servidor
+TEST_BIN     = servidor/test_db
 
 # --- Objetos -------------------------------------------------
 SERVIDOR_OBJS = $(SERVIDOR_SRCS:.cpp=.o)
+# Tests: misma capa BD + clases Producto, pero sin main.cpp del servidor
+TEST_OBJS = $(filter-out $(SERVIDOR_DIR)/main.o,$(SERVIDOR_OBJS)) \
+            $(SERVIDOR_DIR)/test_db.o
 
 # ============================================================
-.PHONY: all cliente servidor clean
+.PHONY: all cliente servidor test clean
 
 all: cliente servidor
 
@@ -57,6 +61,13 @@ $(SERVIDOR_DIR)/%.o: $(SERVIDOR_DIR)/%.cpp
 $(SERVIDOR_BIN): $(SERVIDOR_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS_SRV)
 
+# --- Tests del servidor -------------------------------------
+test: $(TEST_BIN)
+	./$(TEST_BIN)
+
+$(TEST_BIN): $(TEST_OBJS)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIBS_SRV)
+
 # --- Limpieza -----------------------------------------------
 clean:
-	rm -f $(CLIENTE_BIN) $(SERVIDOR_BIN) $(SERVIDOR_DIR)/*.o
+	rm -f $(CLIENTE_BIN) $(SERVIDOR_BIN) $(TEST_BIN) $(SERVIDOR_DIR)/*.o

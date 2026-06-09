@@ -24,7 +24,6 @@ void ventana_bienvenida(void) {
     printf("  ║                                                      ║\n");
     printf("  ║   [1] Iniciar Sesion                                 ║\n");
     printf("  ║   [2] Registrar Nuevo Operario                       ║\n");
-    printf("  ║   [3] Acerca de                                      ║\n");
     printf("  ║   [0] Salir del Programa                             ║\n");
     printf("  ║                                                      ║\n");
     printf("  ╚══════════════════════════════════════════════════════╝\n");
@@ -32,7 +31,7 @@ void ventana_bienvenida(void) {
 }
 
 /* Devuelve: 1 = login OK | 0 = credenciales agotadas | -1 = se perdio el servidor */
-int ventana_login(socket_t sock, char *usuario_logueado) {
+int ventana_login(socket_t sock, char *usuario_logueado, char *rol_logueado) {
     char user[32], pass[64];
     int intentos = 3;
 
@@ -60,6 +59,8 @@ int ventana_login(socket_t sock, char *usuario_logueado) {
         if (resp.codigo == RESP_OK) {
             strncpy(usuario_logueado, user, 31);
             usuario_logueado[31] = '\0';
+            strncpy(rol_logueado, resp.rol, 15);
+            rol_logueado[15] = '\0';
             printf("\n  [OK] Bienvenido, %s (%s).\n",
                    resp.nombre_completo[0] ? resp.nombre_completo : user,
                    resp.rol);
@@ -137,20 +138,10 @@ int ventana_registro(socket_t sock) {
     return 0;
 }
 
-void ventana_acerca_de(void) {
-    limpiar_pantalla();
-    printf("  ╔══════════════════════════════════════════╗\n");
-    printf("  ║       DEUSTO LOGISTICS TERMINAL          ║\n");
-    printf("  ╚══════════════════════════════════════════╝\n");
-    printf("  \nAutor: Grupo 6\n");
-    printf("  Arquitectura: cliente (C) <--> servidor (C++) por TCP/IP\n");
-    printf("\n  Presione Enter para volver...");
-    getchar();
-}
-
 int main(void) {
     int opcion;
     char user_act[32];
+    char rol_act[16];
 
     if (cargar_config("datos/config.txt") != 0) {
         printf("Aviso: no se pudo leer datos/config.txt, se usan valores por defecto.\n");
@@ -186,9 +177,14 @@ int main(void) {
         int rc = 0;
         switch (opcion) {
             case 1: {
-                int r = ventana_login(sock, user_act);
+                int r = ventana_login(sock, user_act, rol_act);
                 if (r == 1) {
-                    rc = menu_principal(sock, user_act);
+                    rc = menu_principal(sock, user_act, rol_act);
+                    if (rc == 0) {
+                        /* Cierre de sesion voluntario: liberar el usuario
+                         * en el servidor (la conexion sigue abierta). */
+                        red_logout(sock);
+                    }
                 } else if (r == -1) {
                     rc = -1;
                 }
@@ -196,9 +192,6 @@ int main(void) {
             }
             case 2:
                 rc = ventana_registro(sock);
-                break;
-            case 3:
-                ventana_acerca_de();
                 break;
             case 0:
                 red_cerrar(sock);

@@ -43,7 +43,7 @@ static bool obtener_producto(const char* id_producto, int& stock,
                              std::string& ubicacion) {
     const char* sql =
         "SELECT cantidad_actual, stock_minimo, nombre, COALESCE(ubicacion_almacen,'') "
-        "FROM PRODUCTOS WHERE id_producto = ?;";
+        "FROM PRODUCTOS WHERE id_producto = ? AND activo = 1;";
     sqlite3_stmt* stmt = nullptr;
     bool encontrado = false;
 
@@ -91,6 +91,121 @@ static const char* calcular_estado(int stock, int stock_minimo) {
     return "NORMAL";
 }
 
+/* Crea un pedido de reposicion automatico si el stock quedo bajo el minimo y
+ * no hay ya un pedido pendiente para ese producto. NO bloquea el mutex: debe
+ * llamarse desde una funcion que ya lo tenga tomado (p. ej. db_movimiento) y
+ * dentro de su transaccion. Devuelve true si creo un pedido. */
+static bool crear_pedido_reposicion(const char* id_producto,
+                                    int stock_resultante, int stock_minimo) {
+    /* Ya hay uno pendiente? */
+    const char* sql_chk =
+        "SELECT COUNT(*) FROM PEDIDOS_REPOSICION "
+        "WHERE id_producto = ? AND estado = 'pendiente';";
+    sqlite3_stmt* stmt = nullptr;
+    int pendientes = 0;
+    if (sqlite3_prepare_v2(db, sql_chk, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, id_producto, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) pendientes = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (pendientes > 0) return false;
+
+    int cantidad = stock_minimo * 2 - stock_resultante;
+    if (cantidad < 1) cantidad = stock_minimo > 0 ? stock_minimo : 1;
+
+    /* id_proveedor se toma del propio producto mediante subconsulta */
+    const char* sql_ins =
+        "INSERT INTO PEDIDOS_REPOSICION (id_producto, id_proveedor, cantidad) "
+        "VALUES (?, (SELECT id_proveedor FROM PRODUCTOS WHERE id_producto = ?), ?);";
+    bool creado = false;
+    if (sqlite3_prepare_v2(db, sql_ins, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, id_producto, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, id_producto, -1, SQLITE_STATIC);
+        sqlite3_bind_int (stmt, 3, cantidad);
+        creado = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+    }
+    return creado;
+}
+
+/* Devuelve true si 'tabla' tiene una columna llamada 'col'. */
+static bool columna_existe(const char* tabla, const char* col) {
+    std::string sql = "PRAGMA table_info(" + std::string(tabla) + ");";
+    sqlite3_stmt* stmt = nullptr;
+    bool existe = false;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char* nombre = sqlite3_column_text(stmt, 1); /* col 1 = name */
+        if (nombre && std::string(reinterpret_cast<const char*>(nombre)) == col) {
+            existe = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return existe;
+}
+
+/* Migracion idempotente: crea tablas/columnas nuevas sobre una BD existente
+ * sin perder datos. Seguro de ejecutar en cada arranque. */
+static void db_migrar() {
+    /* Tablas nuevas (no rompen instalaciones antiguas) */
+    sqlite3_exec(db,
+        "CREATE TABLE IF NOT EXISTS PROVEEDORES ("
+        " id_proveedor INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " nombre TEXT NOT NULL,"
+        " contacto TEXT,"
+        " telefono TEXT,"
+        " activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0,1)));",
+        nullptr, nullptr, nullptr);
+
+    sqlite3_exec(db,
+        "CREATE TABLE IF NOT EXISTS PEDIDOS_REPOSICION ("
+        " id_pedido INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " id_producto TEXT NOT NULL,"
+        " id_proveedor INTEGER,"
+        " cantidad INTEGER NOT NULL CHECK (cantidad > 0),"
+        " fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        " estado TEXT NOT NULL DEFAULT 'pendiente' "
+        "   CHECK (estado IN ('pendiente','recibido','cancelado')),"
+        " FOREIGN KEY (id_producto) REFERENCES PRODUCTOS(id_producto),"
+        " FOREIGN KEY (id_proveedor) REFERENCES PROVEEDORES(id_proveedor));",
+        nullptr, nullptr, nullptr);
+
+    /* Columnas nuevas en PRODUCTOS (SQLite no tiene ADD COLUMN IF NOT EXISTS) */
+    if (!columna_existe("PRODUCTOS", "activo")) {
+        sqlite3_exec(db,
+            "ALTER TABLE PRODUCTOS ADD COLUMN activo INTEGER NOT NULL DEFAULT 1;",
+            nullptr, nullptr, nullptr);
+    }
+    if (!columna_existe("PRODUCTOS", "id_proveedor")) {
+        sqlite3_exec(db,
+            "ALTER TABLE PRODUCTOS ADD COLUMN id_proveedor INTEGER;",
+            nullptr, nullptr, nullptr);
+    }
+
+    /* Seed de proveedores si la tabla esta vacia (BD ya existente) */
+    sqlite3_stmt* stmt = nullptr;
+    int n_prov = 0;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM PROVEEDORES;", -1, &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) n_prov = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+    }
+    if (n_prov == 0) {
+        sqlite3_exec(db,
+            "INSERT INTO PROVEEDORES (nombre, contacto, telefono) VALUES "
+            "('Suministros Bilbao S.L.', 'ventas@sumbilbao.es', '944111222'),"
+            "('Iberica de Almacenaje', 'pedidos@iberalmacen.es', '915333444'),"
+            "('FrioNorte Distribucion', 'comercial@frionorte.es', '946555666');",
+            nullptr, nullptr, nullptr);
+        /* Asignar un proveedor por defecto a los productos que no tengan */
+        sqlite3_exec(db,
+            "UPDATE PRODUCTOS SET id_proveedor = 1 WHERE id_proveedor IS NULL;",
+            nullptr, nullptr, nullptr);
+    }
+}
+
 /* API publica */
 bool db_init(const char* ruta) {
     if (sqlite3_open(ruta, &db) != SQLITE_OK) {
@@ -99,6 +214,8 @@ bool db_init(const char* ruta) {
     }
     sqlite3_busy_timeout(db, 3000);
     sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db, "PRAGMA journal_mode = WAL;", nullptr, nullptr, nullptr);
+    db_migrar();
     std::cout << "[BD] Archivo abierto: " << ruta << std::endl;
     return true;
 }
@@ -271,14 +388,23 @@ void db_movimiento(const MovimientoStock& mov, RespuestaServidor& resp) {
         sqlite3_finalize(stmt_i);
     }
 
+    /* Auto-reposicion: si una salida deja el stock bajo el minimo, generar
+     * pedido de reposicion automatico (dentro de la misma transaccion). */
+    bool pedido_creado = false;
+    if (ok && mov.tipo_op == OP_SALIDA && stock_resultante < stock_minimo) {
+        pedido_creado = crear_pedido_reposicion(mov.id_producto,
+                                                stock_resultante, stock_minimo);
+    }
+
     if (ok) {
         sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
         resp.stock_actual = stock_resultante;
         if (stock_resultante < stock_minimo) {
             resp.codigo = RESP_OK;
             snprintf(resp.mensaje, sizeof(resp.mensaje),
-                     "Registrado. AVISO: stock (%d) bajo el minimo (%d)",
-                     stock_resultante, stock_minimo);
+                     "Registrado. AVISO: stock (%d) < minimo (%d)%s",
+                     stock_resultante, stock_minimo,
+                     pedido_creado ? ". Pedido de reposicion generado" : "");
         } else {
             resp.codigo = RESP_OK;
             copiar(resp.mensaje, sizeof(resp.mensaje), "Operacion registrada correctamente");
@@ -322,22 +448,37 @@ int db_historial(const HistorialRequest& req, std::vector<HistorialItem>& out) {
     std::lock_guard<std::mutex> lock(g_db_mutex);
     out.clear();
 
-    bool con_filtro = (req.filtro_producto[0] != '\0');
+    bool f_producto = (req.filtro_producto[0] != '\0');
+    bool f_operario = (req.filtro_operario[0] != '\0');
+    bool f_desde    = (req.fecha_desde[0]    != '\0');
+    bool f_hasta    = (req.fecha_hasta[0]    != '\0');
+
     std::string sql =
         "SELECT h.timestamp, h.id_producto, h.tipo_operacion, h.cantidad, "
         "       h.stock_resultante, COALESCE(u.nombre_usuario,'?') "
         "FROM HISTORIAL_MOVIMIENTOS h "
         "LEFT JOIN USUARIOS u ON u.id_usuario = h.id_usuario ";
-    if (con_filtro) sql += "WHERE h.id_producto = ? ";
+
+    std::vector<std::string> clausulas;
+    if (f_producto) clausulas.push_back("h.id_producto = ?");
+    if (f_operario) clausulas.push_back("u.nombre_usuario = ?");
+    if (f_desde)    clausulas.push_back("date(h.timestamp) >= date(?)");
+    if (f_hasta)    clausulas.push_back("date(h.timestamp) <= date(?)");
+
+    for (size_t i = 0; i < clausulas.size(); ++i) {
+        sql += (i == 0 ? "WHERE " : "AND ") + clausulas[i] + " ";
+    }
     sql += "ORDER BY h.id_movimiento DESC LIMIT 500;";
 
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
         return 0;
     }
-    if (con_filtro) {
-        sqlite3_bind_text(stmt, 1, req.filtro_producto, -1, SQLITE_STATIC);
-    }
+    int idx = 1;
+    if (f_producto) sqlite3_bind_text(stmt, idx++, req.filtro_producto, -1, SQLITE_STATIC);
+    if (f_operario) sqlite3_bind_text(stmt, idx++, req.filtro_operario, -1, SQLITE_STATIC);
+    if (f_desde)    sqlite3_bind_text(stmt, idx++, req.fecha_desde,     -1, SQLITE_STATIC);
+    if (f_hasta)    sqlite3_bind_text(stmt, idx++, req.fecha_hasta,     -1, SQLITE_STATIC);
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         HistorialItem it;
@@ -361,7 +502,7 @@ int db_resumen(std::vector<ResumenItem>& out) {
 
     const char* sql =
         "SELECT id_producto, nombre, cantidad_actual, stock_minimo "
-        "FROM PRODUCTOS ORDER BY id_producto;";
+        "FROM PRODUCTOS WHERE activo = 1 ORDER BY id_producto;";
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return 0;
@@ -395,6 +536,7 @@ void db_mostrar_costes_almacenamiento() {
         "LEFT JOIN PRODUCTOS_FRAGILES f ON p.id_producto = f.id_producto "
         "LEFT JOIN PRODUCTOS_INFLAMABLES i ON p.id_producto = i.id_producto "
         "LEFT JOIN PRODUCTOS_PERECEDEROS pe ON p.id_producto = pe.id_producto "
+        "WHERE p.activo = 1 "
         "ORDER BY p.id_producto;";
 
     sqlite3_stmt* stmt = nullptr;
@@ -463,9 +605,12 @@ void db_mostrar_costes_almacenamiento() {
 void db_alta_producto(const AltaProductoRequest& req,
                       AltaProductoResponse& resp)
 {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
     memset(&resp, 0, sizeof(resp));
 
     sqlite3_stmt* stmt = nullptr;
+
+    sqlite3_exec(db, "BEGIN;", nullptr, nullptr, nullptr);
 
     const char* sql =
         "INSERT INTO PRODUCTOS "
@@ -474,6 +619,7 @@ void db_alta_producto(const AltaProductoRequest& req,
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
         resp.codigo = RESP_ERROR;
         strcpy(resp.mensaje, "Error preparando producto");
         return;
@@ -490,6 +636,7 @@ void db_alta_producto(const AltaProductoRequest& req,
 
     if (sqlite3_step(stmt) != SQLITE_DONE) {
         sqlite3_finalize(stmt);
+        sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
         resp.codigo = RESP_ERROR;
         strcpy(resp.mensaje, "Producto duplicado o invalido");
         return;
@@ -542,8 +689,203 @@ void db_alta_producto(const AltaProductoRequest& req,
         }
     }
 
+    sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
     resp.codigo = RESP_OK;
     strcpy(resp.mensaje, "Producto creado correctamente");
+}
+
+/* ── BAJA LOGICA DE PRODUCTO ── */
+void db_baja_producto(const BajaProductoRequest& req, OpProductoResponse& resp) {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
+    memset(&resp, 0, sizeof(resp));
+
+    const char* sql =
+        "UPDATE PRODUCTOS SET activo = 0 WHERE id_producto = ? AND activo = 1;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje), "Error interno del servidor");
+        return;
+    }
+    sqlite3_bind_text(stmt, 1, req.id_producto, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc == SQLITE_DONE && sqlite3_changes(db) > 0) {
+        resp.codigo = RESP_OK;
+        snprintf(resp.mensaje, sizeof(resp.mensaje),
+                 "Producto '%s' dado de baja", req.id_producto);
+    } else {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje),
+               "Producto no encontrado o ya dado de baja");
+    }
+}
+
+/* ── EDICION DE PRODUCTO (campos base) ── */
+void db_editar_producto(const EditarProductoRequest& req, OpProductoResponse& resp) {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
+    memset(&resp, 0, sizeof(resp));
+
+    if (strlen(req.nombre) == 0) {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje), "El nombre es obligatorio");
+        return;
+    }
+    if (req.precio_unitario <= 0) {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje), "Precio invalido");
+        return;
+    }
+
+    const char* sql =
+        "UPDATE PRODUCTOS SET nombre = ?, stock_minimo = ?, precio_unitario = ?, "
+        "estrategia_salida = ?, ubicacion_almacen = ? "
+        "WHERE id_producto = ? AND activo = 1;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje), "Error interno del servidor");
+        return;
+    }
+    sqlite3_bind_text  (stmt, 1, req.nombre,            -1, SQLITE_STATIC);
+    sqlite3_bind_int   (stmt, 2, req.stock_minimo);
+    sqlite3_bind_double(stmt, 3, req.precio_unitario);
+    sqlite3_bind_text  (stmt, 4, req.estrategia_salida, -1, SQLITE_STATIC);
+    sqlite3_bind_text  (stmt, 5, req.ubicacion_almacen, -1, SQLITE_STATIC);
+    sqlite3_bind_text  (stmt, 6, req.id_producto,       -1, SQLITE_STATIC);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc == SQLITE_DONE && sqlite3_changes(db) > 0) {
+        resp.codigo = RESP_OK;
+        snprintf(resp.mensaje, sizeof(resp.mensaje),
+                 "Producto '%s' actualizado", req.id_producto);
+    } else if (rc == SQLITE_DONE) {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje),
+               "Producto no encontrado o dado de baja");
+    } else {
+        resp.codigo = RESP_ERROR;
+        copiar(resp.mensaje, sizeof(resp.mensaje), "No se pudo actualizar (datos invalidos)");
+    }
+}
+
+/* ── ALERTAS: stock bajo + caducidad ── */
+int db_alertas(std::vector<AlertaItem>& out) {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
+    out.clear();
+
+    /* 1) Stock bajo / sin stock */
+    const char* sql_stock =
+        "SELECT id_producto, nombre, cantidad_actual, stock_minimo "
+        "FROM PRODUCTOS "
+        "WHERE activo = 1 AND cantidad_actual < stock_minimo "
+        "ORDER BY cantidad_actual ASC;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql_stock, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            AlertaItem it;
+            memset(&it, 0, sizeof(it));
+            copiar(it.id_producto, sizeof(it.id_producto), reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+            copiar(it.nombre,      sizeof(it.nombre),      reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+            it.stock        = sqlite3_column_int(stmt, 2);
+            it.stock_minimo = sqlite3_column_int(stmt, 3);
+            copiar(it.tipo_alerta, sizeof(it.tipo_alerta),
+                   it.stock <= 0 ? "SIN_STOCK" : "STOCK_BAJO");
+            snprintf(it.detalle, sizeof(it.detalle), "min %d", it.stock_minimo);
+            out.push_back(it);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    /* 2) Caducidad de perecederos (caducados o que caducan en <= 30 dias) */
+    const char* sql_cad =
+        "SELECT p.id_producto, p.nombre, p.cantidad_actual, p.stock_minimo, "
+        "       pe.fecha_caducidad, "
+        "       CAST(julianday(pe.fecha_caducidad) - julianday('now') AS INTEGER) "
+        "FROM PRODUCTOS p "
+        "JOIN PRODUCTOS_PERECEDEROS pe ON pe.id_producto = p.id_producto "
+        "WHERE p.activo = 1 "
+        "  AND julianday(pe.fecha_caducidad) - julianday('now') <= 30 "
+        "ORDER BY pe.fecha_caducidad ASC;";
+    if (sqlite3_prepare_v2(db, sql_cad, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            AlertaItem it;
+            memset(&it, 0, sizeof(it));
+            copiar(it.id_producto, sizeof(it.id_producto), reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+            copiar(it.nombre,      sizeof(it.nombre),      reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+            it.stock        = sqlite3_column_int(stmt, 2);
+            it.stock_minimo = sqlite3_column_int(stmt, 3);
+            const char* fecha = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+            int dias = sqlite3_column_int(stmt, 5);
+            copiar(it.tipo_alerta, sizeof(it.tipo_alerta),
+                   dias < 0 ? "CADUCADO" : "CADUCA_PRONTO");
+            snprintf(it.detalle, sizeof(it.detalle), "%s", fecha ? fecha : "-");
+            out.push_back(it);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    return (int)out.size();
+}
+
+/* ── LISTADO DE PROVEEDORES ── */
+int db_proveedores(std::vector<ProveedorItem>& out) {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
+    out.clear();
+
+    const char* sql =
+        "SELECT id_proveedor, nombre, COALESCE(contacto,''), COALESCE(telefono,'') "
+        "FROM PROVEEDORES WHERE activo = 1 ORDER BY id_proveedor;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        ProveedorItem it;
+        memset(&it, 0, sizeof(it));
+        it.id_proveedor = sqlite3_column_int(stmt, 0);
+        copiar(it.nombre,   sizeof(it.nombre),   reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+        copiar(it.contacto, sizeof(it.contacto), reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+        copiar(it.telefono, sizeof(it.telefono), reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+        out.push_back(it);
+    }
+    sqlite3_finalize(stmt);
+    return (int)out.size();
+}
+
+/* ── LISTADO DE PEDIDOS DE REPOSICION PENDIENTES ── */
+int db_pedidos(std::vector<PedidoItem>& out) {
+    std::lock_guard<std::mutex> lock(g_db_mutex);
+    out.clear();
+
+    /* Todos los pedidos: pendientes primero, luego recibidos y cancelados. */
+    const char* sql =
+        "SELECT pr.id_pedido, pr.id_producto, COALESCE(pv.nombre,'(sin proveedor)'), "
+        "       pr.cantidad, pr.fecha, pr.estado "
+        "FROM PEDIDOS_REPOSICION pr "
+        "LEFT JOIN PROVEEDORES pv ON pv.id_proveedor = pr.id_proveedor "
+        "ORDER BY CASE pr.estado WHEN 'pendiente' THEN 0 "
+        "                        WHEN 'recibido'  THEN 1 ELSE 2 END, "
+        "         pr.id_pedido DESC LIMIT 500;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        PedidoItem it;
+        memset(&it, 0, sizeof(it));
+        it.id_pedido = sqlite3_column_int(stmt, 0);
+        copiar(it.id_producto, sizeof(it.id_producto), reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+        copiar(it.proveedor,   sizeof(it.proveedor),   reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+        it.cantidad = sqlite3_column_int(stmt, 3);
+        copiar(it.fecha,  sizeof(it.fecha),  reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4)));
+        copiar(it.estado, sizeof(it.estado), reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5)));
+        out.push_back(it);
+    }
+    sqlite3_finalize(stmt);
+    return (int)out.size();
 }
 
 

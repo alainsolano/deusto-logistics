@@ -17,3 +17,10 @@ int  db_resumen   (std::vector<ResumenItem>& out);
 void db_mostrar_costes_almacenamiento();
 void db_alta_producto(const AltaProductoRequest& req,
                       AltaProductoResponse& resp);
+
+void db_baja_producto  (const BajaProductoRequest& req,   OpProductoResponse& resp);
+void db_editar_producto(const EditarProductoRequest& req, OpProductoResponse& resp);
+
+int  db_alertas    (std::vector<AlertaItem>& out);
+int  db_proveedores(std::vector<ProveedorItem>& out);
+int  db_pedidos    (std::vector<PedidoItem>& out);

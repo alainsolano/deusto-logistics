@@ -2,6 +2,7 @@
 *.exe
 *.out
 servidor/servidor
+servidor/test_db
 cliente/cliente
 cliente_app
 servidor_app
@@ -13,6 +14,10 @@ cliente/cliente_app
 
 # Base de datos local de pruebas
 datos/almacen.db
+
+# Ficheros auxiliares de SQLite (modo WAL)
+*.db-wal
+*.db-shm
 
 # Fichero de usuarios (ahora se gestionan en la BD del servidor)
 datos/usuarios.dat

@@ -6,6 +6,8 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <set>
+#include <string>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -30,6 +32,10 @@
 /*  LOG DEL SERVIDOR  */
 static FILE* g_logfile = nullptr;
 static std::mutex g_log_mutex;
+
+/*  SESIONES ACTIVAS  (un usuario solo puede tener una sesion a la vez)  */
+static std::set<std::string> g_sesiones;
+static std::mutex g_sesiones_mutex;
 
 static void log_srv(const char* fmt, ...) {
     std::lock_guard<std::mutex> lock(g_log_mutex);
@@ -83,6 +89,9 @@ static bool recibir_todo(SOCKET s, void* buf, int len) {
 
 /*  ATENCION A UN CLIENTE (un hilo por conexion) */
 static void atender_cliente(SOCKET cli, std::string ip) {
+    std::string usuario_actual;  /* usuario logueado en ESTA conexion ("" = ninguno) */
+    std::string rol_actual;      /* rol del usuario logueado ("admin" | "operario") */
+
     while (true) {
         CabeceraPeticion cab;
         if (!recibir_todo(cli, &cab, sizeof(cab))) {
@@ -95,10 +104,41 @@ static void atender_cliente(SOCKET cli, std::string ip) {
                 if (!recibir_todo(cli, &req, sizeof(req))) goto fin;
                 LoginResponse resp;
                 db_login(req, resp);
+
+                /* Control de sesion unica: rechazar si el usuario ya tiene
+                 * otra sesion activa en una conexion distinta. */
+                if (resp.codigo == RESP_OK) {
+                    std::string nuevo = req.nombre_usuario;
+                    std::lock_guard<std::mutex> lock(g_sesiones_mutex);
+                    if (g_sesiones.count(nuevo) && nuevo != usuario_actual) {
+                        resp.codigo = RESP_ERROR;
+                        snprintf(resp.mensaje, sizeof(resp.mensaje),
+                                 "Usuario ya tiene una sesion activa");
+                    } else {
+                        if (!usuario_actual.empty() && usuario_actual != nuevo)
+                            g_sesiones.erase(usuario_actual);
+                        g_sesiones.insert(nuevo);
+                        usuario_actual = nuevo;
+                        rol_actual = resp.rol;
+                    }
+                }
+
                 log_srv("LOGIN | usuario: %s | resultado: %s | ip: %s",
                         req.nombre_usuario,
                         resp.codigo == RESP_OK ? "OK" : "FALLIDO", ip.c_str());
                 if (!enviar_todo(cli, &resp, sizeof(resp))) goto fin;
+                break;
+            }
+            case PETICION_LOGOUT: {
+                /* Sin cuerpo ni respuesta: solo libera la sesion. */
+                std::lock_guard<std::mutex> lock(g_sesiones_mutex);
+                if (!usuario_actual.empty()) {
+                    g_sesiones.erase(usuario_actual);
+                    log_srv("LOGOUT | usuario: %s | ip: %s",
+                            usuario_actual.c_str(), ip.c_str());
+                    usuario_actual.clear();
+                    rol_actual.clear();
+                }
                 break;
             }
             case PETICION_REGISTRO: {
@@ -166,11 +206,17 @@ case PETICION_ALTA_PRODUCTO: {
     if (!recibir_todo(cli, &req, sizeof(req))) goto fin;
 
     AltaProductoResponse resp;
-    db_alta_producto(req, resp);
+    if (rol_actual != "admin") {
+        resp.codigo = RESP_ERROR;
+        snprintf(resp.mensaje, sizeof(resp.mensaje),
+                 "Permiso denegado: requiere rol admin");
+    } else {
+        db_alta_producto(req, resp);
+    }
 
-    log_srv("ALTA_PRODUCTO | producto: %s | tipo: %s | resultado: %s | ip: %s",
-            req.id_producto,
-            req.tipo,
+    log_srv("ALTA_PRODUCTO | producto: %s | tipo: %s | usuario: %s | resultado: %s | ip: %s",
+            req.id_producto, req.tipo,
+            usuario_actual.empty() ? "-" : usuario_actual.c_str(),
             resp.codigo == RESP_OK ? "OK" : "ERROR",
             ip.c_str());
 
@@ -178,6 +224,74 @@ case PETICION_ALTA_PRODUCTO: {
     break;
 }
 
+case PETICION_BAJA_PRODUCTO: {
+    BajaProductoRequest req;
+    if (!recibir_todo(cli, &req, sizeof(req))) goto fin;
+    OpProductoResponse resp;
+    if (rol_actual != "admin") {
+        resp.codigo = RESP_ERROR;
+        snprintf(resp.mensaje, sizeof(resp.mensaje),
+                 "Permiso denegado: requiere rol admin");
+    } else {
+        db_baja_producto(req, resp);
+    }
+    log_srv("BAJA_PRODUCTO | producto: %s | usuario: %s | resultado: %s | ip: %s",
+            req.id_producto, usuario_actual.empty() ? "-" : usuario_actual.c_str(),
+            resp.codigo == RESP_OK ? "OK" : "ERROR", ip.c_str());
+    if (!enviar_todo(cli, &resp, sizeof(resp))) goto fin;
+    break;
+}
+
+case PETICION_EDITAR_PRODUCTO: {
+    EditarProductoRequest req;
+    if (!recibir_todo(cli, &req, sizeof(req))) goto fin;
+    OpProductoResponse resp;
+    if (rol_actual != "admin") {
+        resp.codigo = RESP_ERROR;
+        snprintf(resp.mensaje, sizeof(resp.mensaje),
+                 "Permiso denegado: requiere rol admin");
+    } else {
+        db_editar_producto(req, resp);
+    }
+    log_srv("EDITAR_PRODUCTO | producto: %s | usuario: %s | resultado: %s | ip: %s",
+            req.id_producto, usuario_actual.empty() ? "-" : usuario_actual.c_str(),
+            resp.codigo == RESP_OK ? "OK" : "ERROR", ip.c_str());
+    if (!enviar_todo(cli, &resp, sizeof(resp))) goto fin;
+    break;
+}
+
+case PETICION_ALERTAS: {
+    std::vector<AlertaItem> items;
+    int32_t n = (int32_t)db_alertas(items);
+    if (!enviar_todo(cli, &n, sizeof(n))) goto fin;
+    for (const auto& it : items) {
+        if (!enviar_todo(cli, &it, sizeof(it))) goto fin;
+    }
+    log_srv("ALERTAS | activas: %d | ip: %s", n, ip.c_str());
+    break;
+}
+
+case PETICION_PROVEEDORES: {
+    std::vector<ProveedorItem> items;
+    int32_t n = (int32_t)db_proveedores(items);
+    if (!enviar_todo(cli, &n, sizeof(n))) goto fin;
+    for (const auto& it : items) {
+        if (!enviar_todo(cli, &it, sizeof(it))) goto fin;
+    }
+    log_srv("PROVEEDORES | total: %d | ip: %s", n, ip.c_str());
+    break;
+}
+
+case PETICION_PEDIDOS: {
+    std::vector<PedidoItem> items;
+    int32_t n = (int32_t)db_pedidos(items);
+    if (!enviar_todo(cli, &n, sizeof(n))) goto fin;
+    for (const auto& it : items) {
+        if (!enviar_todo(cli, &it, sizeof(it))) goto fin;
+    }
+    log_srv("PEDIDOS | pendientes: %d | ip: %s", n, ip.c_str());
+    break;
+}
 
             default:
                 log_srv("PETICION_DESCONOCIDA | tipo: %d | ip: %s",
@@ -187,7 +301,12 @@ case PETICION_ALTA_PRODUCTO: {
     }
 
 fin:
-    log_srv("DESCONEXION | ip: %s", ip.c_str());
+    {
+        std::lock_guard<std::mutex> lock(g_sesiones_mutex);
+        if (!usuario_actual.empty()) g_sesiones.erase(usuario_actual);
+    }
+    log_srv("DESCONEXION | ip: %s | usuario: %s", ip.c_str(),
+            usuario_actual.empty() ? "-" : usuario_actual.c_str());
     CLOSE_SOCKET(cli);
 }
 

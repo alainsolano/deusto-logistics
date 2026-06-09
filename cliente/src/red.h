@@ -33,6 +33,9 @@ void red_cerrar(socket_t s);
 int red_login    (socket_t s, const char *usuario, const char *pass,
                   LoginResponse *resp);
 
+/* Cierra la sesion en el servidor (libera el usuario). No espera respuesta. */
+int red_logout   (socket_t s);
+
 int red_registro (socket_t s, const char *usuario, const char *pass,
                   RegistroResponse *resp);
 
@@ -43,13 +46,25 @@ int red_consulta (socket_t s, const char *id_producto,
                   ConsultaResponse *resp);
 
 /* Historial: rellena 'items' (hasta max_items) y devuelve el numero de
- * elementos recibidos en *n_items. Retorno 0 si OK, -1 si error de red. */
+ * elementos recibidos en *n_items. Cualquier filtro puede ir a NULL/"" para
+ * no aplicarlo. Retorno 0 si OK, -1 si error de red. */
 int red_historial(socket_t s, const char *filtro_producto,
+                  const char *filtro_operario,
+                  const char *fecha_desde, const char *fecha_hasta,
                   HistorialItem *items, int max_items, int *n_items);
 
 /* Resumen: igual que historial pero sin filtro. */
 int red_resumen  (socket_t s, ResumenItem *items, int max_items, int *n_items);
 
 int red_alta_producto(socket_t s, const AltaProductoRequest *req, AltaProductoResponse *resp);
+
+/* Baja / edicion de producto. */
+int red_baja_producto  (socket_t s, const char *id_producto, OpProductoResponse *resp);
+int red_editar_producto(socket_t s, const EditarProductoRequest *req, OpProductoResponse *resp);
+
+/* Listas (patron int n + n items). */
+int red_alertas    (socket_t s, AlertaItem    *items, int max_items, int *n_items);
+int red_proveedores(socket_t s, ProveedorItem *items, int max_items, int *n_items);
+int red_pedidos    (socket_t s, PedidoItem    *items, int max_items, int *n_items);
 
 #endif

@@ -104,6 +104,11 @@ int red_login(socket_t s, const char *usuario, const char *pass,
     return 0;
 }
 
+/* ── LOGOUT ── (solo cabecera, sin respuesta) */
+int red_logout(socket_t s) {
+    return enviar_cabecera(s, PETICION_LOGOUT);
+}
+
 /* ── REGISTRO ── */
 int red_registro(socket_t s, const char *usuario, const char *pass,
                  RegistroResponse *resp) {
@@ -142,13 +147,19 @@ int red_consulta(socket_t s, const char *id_producto,
 
 /* ── HISTORIAL ── */
 int red_historial(socket_t s, const char *filtro_producto,
+                  const char *filtro_operario,
+                  const char *fecha_desde, const char *fecha_hasta,
                   HistorialItem *items, int max_items, int *n_items) {
     HistorialRequest req;
     memset(&req, 0, sizeof(req));
-    if (filtro_producto != NULL) {
-        strncpy(req.filtro_producto, filtro_producto,
-                sizeof(req.filtro_producto) - 1);
-    }
+    if (filtro_producto != NULL)
+        strncpy(req.filtro_producto, filtro_producto, sizeof(req.filtro_producto) - 1);
+    if (filtro_operario != NULL)
+        strncpy(req.filtro_operario, filtro_operario, sizeof(req.filtro_operario) - 1);
+    if (fecha_desde != NULL)
+        strncpy(req.fecha_desde, fecha_desde, sizeof(req.fecha_desde) - 1);
+    if (fecha_hasta != NULL)
+        strncpy(req.fecha_hasta, fecha_hasta, sizeof(req.fecha_hasta) - 1);
 
     if (enviar_cabecera(s, PETICION_HISTORIAL) != 0) return -1;
     if (enviar_todo(s, &req, sizeof(req)) != 0)      return -1;
@@ -203,4 +214,60 @@ int red_alta_producto(socket_t s, const AltaProductoRequest *req, AltaProductoRe
     }
 
     return 0;
+}
+
+/* ── BAJA / EDICION ── */
+int red_baja_producto(socket_t s, const char *id_producto, OpProductoResponse *resp) {
+    BajaProductoRequest req;
+    memset(&req, 0, sizeof(req));
+    strncpy(req.id_producto, id_producto, sizeof(req.id_producto) - 1);
+
+    if (enviar_cabecera(s, PETICION_BAJA_PRODUCTO) != 0) return -1;
+    if (enviar_todo(s, &req, sizeof(req)) != 0)          return -1;
+    if (recibir_todo(s, resp, sizeof(*resp)) != 0)       return -1;
+    return 0;
+}
+
+int red_editar_producto(socket_t s, const EditarProductoRequest *req, OpProductoResponse *resp) {
+    if (enviar_cabecera(s, PETICION_EDITAR_PRODUCTO) != 0) return -1;
+    if (enviar_todo(s, req, sizeof(*req)) != 0)            return -1;
+    if (recibir_todo(s, resp, sizeof(*resp)) != 0)         return -1;
+    return 0;
+}
+
+/* Recepcion generica de una lista: int32_t n + n elementos de 'elem_size'.
+   Los que excedan 'max_items' se reciben en un buffer de descarte. */
+static int recibir_lista(socket_t s, void *items, int elem_size,
+                         int max_items, int *n_items) {
+    int32_t n = 0;
+    if (recibir_todo(s, &n, sizeof(n)) != 0) return -1;
+
+    int recibidos = 0;
+    char *base = (char *)items;
+    char descarte[512];
+    for (int32_t i = 0; i < n; i++) {
+        void *dst = (recibidos < max_items)
+                        ? (void *)(base + (size_t)recibidos * elem_size)
+                        : (void *)descarte;
+        if (recibir_todo(s, dst, elem_size) != 0) return -1;
+        if (recibidos < max_items) recibidos++;
+    }
+    *n_items = recibidos;
+    return 0;
+}
+
+/* ── LISTAS: alertas / proveedores / pedidos ── */
+int red_alertas(socket_t s, AlertaItem *items, int max_items, int *n_items) {
+    if (enviar_cabecera(s, PETICION_ALERTAS) != 0) return -1;
+    return recibir_lista(s, items, sizeof(AlertaItem), max_items, n_items);
+}
+
+int red_proveedores(socket_t s, ProveedorItem *items, int max_items, int *n_items) {
+    if (enviar_cabecera(s, PETICION_PROVEEDORES) != 0) return -1;
+    return recibir_lista(s, items, sizeof(ProveedorItem), max_items, n_items);
+}
+
+int red_pedidos(socket_t s, PedidoItem *items, int max_items, int *n_items) {
+    if (enviar_cabecera(s, PETICION_PEDIDOS) != 0) return -1;
+    return recibir_lista(s, items, sizeof(PedidoItem), max_items, n_items);
 }

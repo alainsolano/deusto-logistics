@@ -42,7 +42,13 @@
 #define PETICION_REGISTRO    4
 #define PETICION_HISTORIAL   5
 #define PETICION_RESUMEN     6
-#define PETICION_ALTA_PRODUCTO 7
+#define PETICION_ALTA_PRODUCTO   7
+#define PETICION_BAJA_PRODUCTO   8
+#define PETICION_EDITAR_PRODUCTO 9
+#define PETICION_ALERTAS         10
+#define PETICION_PROVEEDORES     11
+#define PETICION_PEDIDOS         12
+#define PETICION_LOGOUT          13   /* libera la sesion (sin respuesta) */
 
 /* =========================================================
  * CabeceraPeticion — primer mensaje que identifica el tipo
@@ -118,7 +124,10 @@ typedef struct {
  * HISTORIAL / AUDITORIA
  * ========================================================= */
 typedef struct {
-    char filtro_producto[16]; 
+    char filtro_producto[16];
+    char filtro_operario[32];   /* vacio = cualquier operario */
+    char fecha_desde[24];       /* "YYYY-MM-DD" o vacio */
+    char fecha_hasta[24];       /* "YYYY-MM-DD" o vacio */
 } HistorialRequest;
 
 typedef struct {
@@ -169,5 +178,64 @@ typedef struct {
     int32_t codigo;              /* RESP_OK | RESP_ERROR */
     char mensaje[96];
 } AltaProductoResponse;
+
+/* =========================================================
+ * BAJA Y EDICION DE PRODUCTO
+ * ========================================================= */
+typedef struct {
+    char id_producto[16];
+} BajaProductoRequest;
+
+typedef struct {
+    char    id_producto[16];
+    char    nombre[64];
+    int32_t stock_minimo;
+    double  precio_unitario;
+    char    estrategia_salida[8];   /* FIFO | LIFO */
+    char    ubicacion_almacen[32];
+} EditarProductoRequest;
+
+/* Respuesta generica de operaciones sobre producto (baja / edicion) */
+typedef struct {
+    int32_t codigo;              /* RESP_OK | RESP_ERROR */
+    char    mensaje[96];
+} OpProductoResponse;
+
+/* =========================================================
+ * ALERTAS (stock bajo + caducidad)
+ *   PETICION_ALERTAS -> int n + n AlertaItem
+ * ========================================================= */
+typedef struct {
+    char    id_producto[16];
+    char    nombre[40];
+    int32_t stock;
+    int32_t stock_minimo;
+    char    tipo_alerta[16];     /* STOCK_BAJO | SIN_STOCK | CADUCA_PRONTO | CADUCADO */
+    char    detalle[32];         /* fecha caducidad / dias, o "-" */
+} AlertaItem;
+
+/* =========================================================
+ * PROVEEDORES
+ *   PETICION_PROVEEDORES -> int n + n ProveedorItem
+ * ========================================================= */
+typedef struct {
+    int32_t id_proveedor;
+    char    nombre[64];
+    char    contacto[64];
+    char    telefono[24];
+} ProveedorItem;
+
+/* =========================================================
+ * PEDIDOS DE REPOSICION
+ *   PETICION_PEDIDOS -> int n + n PedidoItem
+ * ========================================================= */
+typedef struct {
+    int32_t id_pedido;
+    char    id_producto[16];
+    char    proveedor[64];
+    int32_t cantidad;
+    char    fecha[24];
+    char    estado[12];          /* pendiente | recibido | cancelado */
+} PedidoItem;
 
 #endif
